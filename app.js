@@ -526,6 +526,7 @@ window.addEventListener('mouseup', (e) => {
 
     if (state.isMoving) {
         // Check for splitting
+        checkAndMergeWalls();
         if (state.selection.length === 1) {
             checkAndSplitObjects(state.selection[0]);
         }
@@ -883,6 +884,10 @@ function deleteSelected() {
     if (state.selection.length > 0) {
         state.objects = state.objects.filter(obj => !state.selection.includes(obj));
         state.selection = [];
+
+        // Check for merging (healing) walls after deletion
+        checkAndMergeWalls();
+
         saveToHistory();
         draw();
         updateToolbar();
@@ -1255,69 +1260,175 @@ function applyPropertyChange(prop, value) {
     updatePropertyPanel();
 }
 
+// ==== Geometry Helpers (split/merge) ====
+function pointToLineDistance(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) return Infinity;
+    return Math.abs((px - x1) * dy - (py - y1) * dx) / len;
+}
+
+function areSegmentsCollinear(segA, segB, tolerance = 6) {
+    if (!segA || !segB) return false;
+    return (
+        pointToLineDistance(segB.x1, segB.y1, segA.x1, segA.y1, segA.x2, segA.y2) < tolerance &&
+        pointToLineDistance(segB.x2, segB.y2, segA.x1, segA.y1, segA.x2, segA.y2) < tolerance
+    );
+}
+
+function isSegmentContained(inner, outer, epsilon = 0.01) {
+    const dx = outer.x2 - outer.x1;
+    const dy = outer.y2 - outer.y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-6) return false;
+
+    const t1 = ((inner.x1 - outer.x1) * dx + (inner.y1 - outer.y1) * dy) / lenSq;
+    const t2 = ((inner.x2 - outer.x1) * dx + (inner.y2 - outer.y1) * dy) / lenSq;
+
+    const minT = Math.min(t1, t2);
+    const maxT = Math.max(t1, t2);
+
+    return minT > epsilon && maxT < (1 - epsilon);
+}
+
+function segmentsOverlap(segA, segB, epsilon = 0.01) {
+    const dx = segA.x2 - segA.x1;
+    const dy = segA.y2 - segA.y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-6) return false;
+
+    const proj = (pt) => ((pt.x - segA.x1) * dx + (pt.y - segA.y1) * dy) / lenSq;
+
+    const aMin = 0;
+    const aMax = 1;
+    const b1 = proj({ x: segB.x1, y: segB.y1 });
+    const b2 = proj({ x: segB.x2, y: segB.y2 });
+    const bMin = Math.min(b1, b2);
+    const bMax = Math.max(b1, b2);
+
+    return !(bMax < aMin - epsilon || bMin > aMax + epsilon);
+}
+
+function getClosestEndpoints(segA, segB) {
+    const endpointsA = [{ x: segA.x1, y: segA.y1 }, { x: segA.x2, y: segA.y2 }];
+    const endpointsB = [{ x: segB.x1, y: segB.y1 }, { x: segB.x2, y: segB.y2 }];
+
+    let best = null;
+
+    endpointsA.forEach(p1 => {
+        endpointsB.forEach(p2 => {
+            const distance = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+            if (!best || distance < best.distance) {
+                best = { p1, p2, distance };
+            }
+        });
+    });
+
+    return best;
+}
+
+function getCombinedSegment(segA, segB) {
+    const dx = segA.x2 - segA.x1;
+    const dy = segA.y2 - segA.y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-6) return null;
+
+    const project = (pt) => ((pt.x - segA.x1) * dx + (pt.y - segA.y1) * dy) / lenSq;
+    const points = [
+        { x: segA.x1, y: segA.y1 },
+        { x: segA.x2, y: segA.y2 },
+        { x: segB.x1, y: segB.y1 },
+        { x: segB.x2, y: segB.y2 },
+    ];
+
+    let minT = Infinity;
+    let maxT = -Infinity;
+
+    points.forEach(pt => {
+        const t = project(pt);
+        if (t < minT) minT = t;
+        if (t > maxT) maxT = t;
+    });
+
+    return {
+        start: { x: segA.x1 + dx * minT, y: segA.y1 + dy * minT },
+        end: { x: segA.x1 + dx * maxT, y: segA.y1 + dy * maxT },
+    };
+}
+
+function isGapBlocked(gapSegment, segA, segB) {
+    const touchTolerance = 2;
+    const gapLength = Math.hypot(gapSegment.x2 - gapSegment.x1, gapSegment.y2 - gapSegment.y1);
+
+    return state.objects.some(obj => {
+        if (obj === segA || obj === segB) return false;
+
+        // Block if anything is attached to the gap endpoints (T-junction)
+        const touchesEndpoint =
+            Math.hypot(obj.x1 - gapSegment.x1, obj.y1 - gapSegment.y1) < touchTolerance ||
+            Math.hypot(obj.x2 - gapSegment.x1, obj.y2 - gapSegment.y1) < touchTolerance ||
+            Math.hypot(obj.x1 - gapSegment.x2, obj.y1 - gapSegment.y2) < touchTolerance ||
+            Math.hypot(obj.x2 - gapSegment.x2, obj.y2 - gapSegment.y2) < touchTolerance;
+
+        if (touchesEndpoint) return true;
+        if (gapLength < 1e-6) return false;
+
+        // Block if another object already occupies the gap
+        if (areSegmentsCollinear(gapSegment, obj) && segmentsOverlap(gapSegment, obj, 0.001)) {
+            return true;
+        }
+
+        return false;
+    });
+}
+
 // ==== Object Splitting Logic ====
 function checkAndSplitObjects(activeObj) {
-    // Only split walls for now
-    // activeObj can be window, door, or another wall (though wall-in-wall is rare)
-    // We iterate through all objects to find a wall that contains activeObj
-
     const newObjects = [];
     let splitOccurred = false;
 
     state.objects.forEach(otherObj => {
         if (otherObj === activeObj) return;
-        if (otherObj.type !== 'wall') return; // Only split walls
+        if (otherObj.type !== 'wall') return;
 
-        if (areCollinear(otherObj, activeObj) && isContained(activeObj, otherObj)) {
-            // Split otherObj
-            splitOccurred = true;
+        if (!areSegmentsCollinear(otherObj, activeObj)) return;
+        if (!isSegmentContained(activeObj, otherObj)) return;
 
-            // We need to determine which end of activeObj is closer to otherObj.x1/y1
-            // to correctly assign the segments.
-            // Since they are collinear and contained, we can project points onto the line.
+        splitOccurred = true;
 
-            // Let's assume the direction from otherObj.x1,y1 to otherObj.x2,y2 is positive.
-            // We find the "start" and "end" of activeObj relative to this direction.
+        const dX = otherObj.x2 - otherObj.x1;
+        const dY = otherObj.y2 - otherObj.y1;
+        const wallLenSq = dX * dX + dY * dY;
 
-            const dX = otherObj.x2 - otherObj.x1;
-            const dY = otherObj.y2 - otherObj.y1;
-            const wallLenSq = dX * dX + dY * dY;
+        const t1 = ((activeObj.x1 - otherObj.x1) * dX + (activeObj.y1 - otherObj.y1) * dY) / wallLenSq;
+        const t2 = ((activeObj.x2 - otherObj.x1) * dX + (activeObj.y2 - otherObj.y1) * dY) / wallLenSq;
 
-            // Project activeObj points
-            const t1 = ((activeObj.x1 - otherObj.x1) * dX + (activeObj.y1 - otherObj.y1) * dY) / wallLenSq;
-            const t2 = ((activeObj.x2 - otherObj.x1) * dX + (activeObj.y2 - otherObj.y1) * dY) / wallLenSq;
+        const tStart = Math.min(t1, t2);
+        const tEnd = Math.max(t1, t2);
 
-            const tStart = Math.min(t1, t2);
-            const tEnd = Math.max(t1, t2);
+        const splitStart = {
+            x: otherObj.x1 + tStart * dX,
+            y: otherObj.y1 + tStart * dY
+        };
 
-            // activeObj is between tStart and tEnd (0 to 1 scale of otherObj)
+        const splitEnd = {
+            x: otherObj.x1 + tEnd * dX,
+            y: otherObj.y1 + tEnd * dY
+        };
 
-            // Segment 1: otherObj start to activeObj start
-            // We modify otherObj to be this segment
-            // New End Point for otherObj:
-            const newX1 = otherObj.x1 + tStart * dX;
-            const newY1 = otherObj.y1 + tStart * dY;
+        const segment2 = {
+            type: 'wall',
+            x1: splitEnd.x,
+            y1: splitEnd.y,
+            x2: otherObj.x2,
+            y2: otherObj.y2
+        };
 
-            // Segment 2: activeObj end to otherObj end
-            // We create a new object for this
-            // New Start Point for newObj:
-            const newX2 = otherObj.x1 + tEnd * dX;
-            const newY2 = otherObj.y1 + tEnd * dY;
+        otherObj.x2 = splitStart.x;
+        otherObj.y2 = splitStart.y;
 
-            const segment2 = {
-                type: 'wall',
-                x1: newX2,
-                y1: newY2,
-                x2: otherObj.x2,
-                y2: otherObj.y2
-            };
-
-            // Update otherObj (Segment 1)
-            otherObj.x2 = newX1;
-            otherObj.y2 = newY1;
-
-            newObjects.push(segment2);
-        }
+        newObjects.push(segment2);
     });
 
     if (splitOccurred) {
@@ -1327,53 +1438,47 @@ function checkAndSplitObjects(activeObj) {
     return splitOccurred;
 }
 
-function areCollinear(obj1, obj2) {
-    // Check if obj2 is on the line defined by obj1
-    // Using cross product method
-    const threshold = 1; // Pixel threshold for collinearity
+function checkAndMergeWalls() {
+    let merged = false;
+    do {
+        merged = false;
+        const walls = state.objects.filter(o => o.type === 'wall');
 
-    // Line 1 vector
-    const dx1 = obj1.x2 - obj1.x1;
-    const dy1 = obj1.y2 - obj1.y1;
+        for (let i = 0; i < walls.length; i++) {
+            for (let j = i + 1; j < walls.length; j++) {
+                const w1 = walls[i];
+                const w2 = walls[j];
 
-    // Vector from obj1.p1 to obj2.p1
-    const dx2 = obj2.x1 - obj1.x1;
-    const dy2 = obj2.y1 - obj1.y1;
+                if (!areSegmentsCollinear(w1, w2)) continue;
 
-    // Vector from obj1.p1 to obj2.p2
-    const dx3 = obj2.x2 - obj1.x1;
-    const dy3 = obj2.y2 - obj1.y1;
+                const closest = getClosestEndpoints(w1, w2);
+                if (!closest) continue;
 
-    // Cross products
-    const cp1 = Math.abs(dx1 * dy2 - dy1 * dx2);
-    const cp2 = Math.abs(dx1 * dy3 - dy1 * dx3);
+                const gapSegment = { x1: closest.p1.x, y1: closest.p1.y, x2: closest.p2.x, y2: closest.p2.y };
 
-    // Normalize by length of obj1 to get distance
-    const len1 = Math.hypot(dx1, dy1);
+                // Keep merges local so distant collinear walls are not fused accidentally
+                if (closest.distance > 150 / state.scale) continue;
 
-    return (cp1 / len1) < threshold && (cp2 / len1) < threshold;
-}
+                if (isGapBlocked(gapSegment, w1, w2)) continue;
 
-function isContained(inner, outer) {
-    // Assumes collinearity is already checked
-    // Check if inner segment is within outer segment
-    // We project points onto the outer line segment (0 to 1)
+                const mergedSegment = getCombinedSegment(w1, w2);
+                if (!mergedSegment) continue;
 
-    const dx = outer.x2 - outer.x1;
-    const dy = outer.y2 - outer.y1;
-    const lenSq = dx * dx + dy * dy;
+                state.objects = state.objects.filter(o => o !== w1 && o !== w2);
+                state.objects.push({
+                    type: 'wall',
+                    x1: mergedSegment.start.x,
+                    y1: mergedSegment.start.y,
+                    x2: mergedSegment.end.x,
+                    y2: mergedSegment.end.y
+                });
 
-    const t1 = ((inner.x1 - outer.x1) * dx + (inner.y1 - outer.y1) * dy) / lenSq;
-    const t2 = ((inner.x2 - outer.x1) * dx + (inner.y2 - outer.y1) * dy) / lenSq;
-
-    const minT = Math.min(t1, t2);
-    const maxT = Math.max(t1, t2);
-
-    // Check if strictly contained (with some buffer to avoid splitting at exact endpoints if undesired, 
-    // but usually exact endpoints means connected, not split. 
-    // We want splitting only if it's strictly inside, i.e., not touching endpoints)
-    const epsilon = 0.01;
-    return minT > epsilon && maxT < (1 - epsilon);
+                merged = true;
+                break;
+            }
+            if (merged) break;
+        }
+    } while (merged);
 }
 
 function getThreeColor(type) {
