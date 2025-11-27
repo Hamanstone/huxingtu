@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Floorplan Editor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+    <header class="toolbar">
+        <button id="select-mode" class="tool-btn active">↖ 選取</button>
+        <div class="separator"></div>
+        <button id="add-wall" class="tool-btn">牆壁</button>
+        <button id="add-door" class="tool-btn">門</button>
+        <button id="add-window" class="tool-btn">窗戶</button>
+        <button id="add-furniture" class="tool-btn">家具</button>
+        <div class="separator"></div>
+        <button id="undo" class="tool-btn">↶ 復原</button>
+        <button id="redo" class="tool-btn">↷ 重做</button>
+        <button id="delete" class="tool-btn danger">🗑 刪除</button>
+        <div class="separator"></div>
+        <button id="preview-3d" class="tool-btn primary">3D 預覽</button>
+        <button id="export" class="tool-btn">匯出</button>
+        <button id="import" class="tool-btn">匯入</button>
+    </header>
+
+    <main class="canvas-container">
+        <canvas id="floorplan-canvas"></canvas>
+    </main>
+
+    <!-- 3D Preview Modal -->
+    <div id="preview-modal" class="modal hidden">
+        <div class="modal-content">
+            <span id="close-modal" class="close">&times;</span>
+            <canvas id="preview-canvas"></canvas>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,147 @@
+/* styles.css - Premium dark theme with glassmorphism */
+:root {
+    --color-bg: hsl(210, 15%, 12%);
+    --color-surface: hsla(210, 15%, 20%, 0.6);
+    --color-primary: hsl(170, 60%, 45%);
+    --color-primary-dark: hsl(170, 60%, 35%);
+    --color-text: hsl(0, 0%, 90%);
+    --color-muted: hsl(0, 0%, 60%);
+    --spacing: 0.5rem;
+    --radius: 0.75rem;
+    --font-family: 'Inter', sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font-family);
+    background: var(--color-bg);
+    color: var(--color-text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+header.toolbar {
+    display: flex;
+    gap: var(--spacing);
+    padding: var(--spacing);
+    background: var(--color-surface);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    align-items: center;
+}
+
+.separator {
+    width: 1px;
+    height: 24px;
+    background: rgba(255, 255, 255, 0.2);
+    margin: 0 4px;
+}
+
+button.tool-btn {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+}
+
+button.tool-btn:hover {
+    background: var(--color-primary);
+    color: #fff;
+}
+
+button.tool-btn.primary,
+button.tool-btn.active {
+    background: var(--color-primary);
+    color: #fff;
+}
+
+button.tool-btn.danger {
+    background: hsla(0, 70%, 50%, 0.3);
+}
+
+button.tool-btn.danger:hover {
+    background: hsl(0, 70%, 50%);
+}
+
+button.tool-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+button.tool-btn:disabled:hover {
+    background: var(--color-surface);
+    color: var(--color-text);
+}
+
+button.tool-btn:active {
+    transform: scale(0.97);
+}
+
+main.canvas-container {
+    flex: 1;
+    position: relative;
+}
+
+canvas#floorplan-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: var(--color-bg);
+}
+
+/* Modal styling */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal.hidden {
+    display: none;
+}
+
+.modal-content {
+    background: var(--color-surface);
+    padding: var(--spacing);
+    border-radius: var(--radius);
+    backdrop-filter: blur(12px);
+    position: relative;
+    width: 80vw;
+    height: 80vh;
+}
+
+.modal-content canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.close {
+    position: absolute;
+    top: var(--spacing);
+    right: var(--spacing);
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--color-muted);
+}
+
+.close:hover {
+    color: var(--color-text);
+}
