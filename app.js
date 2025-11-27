@@ -28,6 +28,8 @@ const state = {
     scale: 1,
     offsetX: 0,
     offsetY: 0,
+    clipboard: [],
+    lastContextWorld: null,
 };
 
 // ==== Canvas Setup ====
@@ -74,6 +76,36 @@ importInput.id = 'import-file';
 importInput.style.display = 'none';
 importInput.addEventListener('change', handleImport);
 document.body.appendChild(importInput);
+
+// Context menu elements
+const contextMenu = document.getElementById('context-menu');
+const menuCopy = document.getElementById('menu-copy');
+const menuPaste = document.getElementById('menu-paste');
+const menuDelete = document.getElementById('menu-delete');
+
+canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    state.lastContextWorld = screenToWorld(screenX, screenY);
+
+    updateContextMenuState();
+    showContextMenu(e.clientX, e.clientY);
+});
+
+document.addEventListener('click', (e) => {
+    if (!contextMenu.contains(e.target)) hideContextMenu();
+});
+
+document.addEventListener('wheel', hideContextMenu, { passive: true });
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') hideContextMenu();
+});
+
+menuCopy.onclick = () => { hideContextMenu(); copySelection(); };
+menuPaste.onclick = () => { hideContextMenu(); pasteClipboard(); };
+menuDelete.onclick = () => { hideContextMenu(); deleteSelected(); };
 
 function setMode(mode) {
     state.mode = mode;
@@ -781,6 +813,64 @@ function deleteSelected() {
         draw();
         updateToolbar();
     }
+}
+
+// ==== Context Menu Actions ====
+function showContextMenu(x, y) {
+    contextMenu.style.left = `${x}px`;
+    contextMenu.style.top = `${y}px`;
+    contextMenu.classList.remove('hidden');
+}
+
+function hideContextMenu() {
+    contextMenu.classList.add('hidden');
+}
+
+function updateContextMenuState() {
+    const hasSelection = state.selection.length > 0;
+    menuCopy.disabled = !hasSelection;
+    menuDelete.disabled = !hasSelection;
+    menuPaste.disabled = state.clipboard.length === 0;
+}
+
+function copySelection() {
+    if (state.selection.length === 0) return;
+    state.clipboard = state.selection.map(obj => JSON.parse(JSON.stringify(obj)));
+}
+
+function pasteClipboard() {
+    if (state.clipboard.length === 0) return;
+    const clones = state.clipboard.map(obj => JSON.parse(JSON.stringify(obj)));
+
+    // 將貼上中心對齊到最後一次開啟選單的位置，並稍微偏移避免重疊
+    let target = state.lastContextWorld || { x: 0, y: 0 };
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    clones.forEach(obj => {
+        minX = Math.min(minX, obj.x1, obj.x2);
+        minY = Math.min(minY, obj.y1, obj.y2);
+        maxX = Math.max(maxX, obj.x1, obj.x2);
+        maxY = Math.max(maxY, obj.y1, obj.y2);
+    });
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    const offset = 20 / state.scale;
+    const dx = target.x - centerX + offset;
+    const dy = target.y - centerY + offset;
+
+    clones.forEach(obj => {
+        obj.x1 += dx;
+        obj.y1 += dy;
+        obj.x2 += dx;
+        obj.y2 += dy;
+    });
+
+    state.objects.push(...clones);
+    state.selection = clones;
+    saveToHistory();
+    draw();
+    updateToolbar();
 }
 
 

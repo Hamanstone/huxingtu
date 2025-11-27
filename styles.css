@@ -258,3 +258,39 @@ canvas#floorplan-canvas {
 .hidden {
     display: none !important;
 }
+
+/* Context menu */
+.context-menu {
+    position: fixed;
+    z-index: 1100;
+    background: var(--color-surface);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    min-width: 140px;
+}
+
+.context-menu button {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--color-text);
+    padding: 0.65rem 1rem;
+    text-align: left;
+    cursor: pointer;
+    font-size: 0.95rem;
+}
+
+.context-menu button:hover:enabled {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.context-menu button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.context-menu button.danger {
+    color: hsl(0, 70%, 70%);
+}
