@@ -20,8 +20,7 @@ const state = {
     isBoxSelecting: false,
     boxSelectionStart: null,
     boxSelectionEnd: null,
-    boxSelectionStart: null,
-    boxSelectionEnd: null,
+    showPropertyPanel: false, // Toggle state for property panel
     history: [],
     historyIndex: -1,
     scale: 1,
@@ -44,16 +43,16 @@ resizeCanvas();
 // ==== Toolbar Handlers ====
 document.getElementById('select-mode').onclick = () => setMode(null);
 document.getElementById('add-wall').onclick = () => setMode('wall');
-document.getElementById('add-door').onclick = () => setMode('door');
-document.getElementById('add-window').onclick = () => setMode('window');
 document.getElementById('add-furniture').onclick = () => setMode('furniture');
-document.getElementById('door-open').onchange = (e) => {
-    if (state.selection.length === 1 && state.selection[0].type === 'door') {
-        state.selection[0].isOpen = e.target.checked;
-        saveToHistory();
-        draw(); // Redraw (though 2D might not change, good practice)
-    }
-};
+
+// Property Panel Events
+document.getElementById('toggle-properties').onclick = togglePropertyPanel;
+document.getElementById('prop-x').onchange = (e) => applyPropertyChange('x', parseFloat(e.target.value));
+document.getElementById('prop-y').onchange = (e) => applyPropertyChange('y', parseFloat(e.target.value));
+document.getElementById('prop-length').onchange = (e) => applyPropertyChange('length', parseFloat(e.target.value));
+document.getElementById('prop-angle').onchange = (e) => applyPropertyChange('angle', parseFloat(e.target.value));
+document.getElementById('prop-door-type').onchange = (e) => applyPropertyChange('subtype', e.target.value);
+document.getElementById('prop-door-open').onchange = (e) => applyPropertyChange('isOpen', e.target.checked);
 
 document.getElementById('preview-3d').onclick = open3DPreview;
 document.getElementById('export').onclick = exportFloorplan;
@@ -113,6 +112,8 @@ function updateToolbar() {
     } else {
         doorOpenControl.classList.add('hidden');
     }
+
+    updatePropertyPanel();
 }
 
 // Keyboard shortcuts
@@ -240,9 +241,10 @@ canvas.addEventListener('mousedown', (e) => {
                         return { obj, p1, p2 };
                     });
                 } else if (!(e.ctrlKey || e.metaKey)) {
-                    // Start moving
-                    state.isMoving = true;
+                    // Start moving (potential)
+                    state.isPotentialMove = true;
                     state.lastMousePos = { x, y };
+                    state.dragStart = { x, y }; // Use dragStart to check threshold
                 } else {
                     // Ctrl click on selected object: deselect
                     const idx = state.selection.indexOf(hit);
@@ -271,8 +273,9 @@ canvas.addEventListener('mousedown', (e) => {
                             p2: { x: hit.x2 - centerX, y: hit.y2 - centerY }
                         }];
                     } else {
-                        state.isMoving = true;
+                        state.isPotentialMove = true;
                         state.lastMousePos = { x, y };
+                        state.dragStart = { x, y };
                     }
                 }
             }
@@ -292,7 +295,7 @@ canvas.addEventListener('mousedown', (e) => {
     }
 });
 
-canvas.addEventListener('mousemove', (e) => {
+window.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
@@ -352,6 +355,14 @@ canvas.addEventListener('mousemove', (e) => {
         return;
     }
 
+    if (state.isPotentialMove) {
+        const dist = Math.hypot(x - state.dragStart.x, y - state.dragStart.y);
+        if (dist > 5 / state.scale) { // 5px threshold
+            state.isMoving = true;
+            state.isPotentialMove = false;
+        }
+    }
+
     if (state.isMoving) {
         let dx = x - state.lastMousePos.x;
         let dy = y - state.lastMousePos.y;
@@ -377,6 +388,7 @@ canvas.addEventListener('mousemove', (e) => {
             y: state.lastMousePos.y + dy
         };
 
+        updatePropertyPanel(); // Update panel while moving
         draw();
         return;
     }
@@ -428,6 +440,7 @@ canvas.addEventListener('mousemove', (e) => {
             obj.x2 = x;
             obj.y2 = y;
         }
+        updatePropertyPanel(); // Update panel while resizing
         draw();
         return;
     }
@@ -465,7 +478,7 @@ canvas.addEventListener('mousemove', (e) => {
     ctx.setLineDash([]);
 });
 
-canvas.addEventListener('mouseup', (e) => {
+window.addEventListener('mouseup', (e) => {
     if (state.isBoxSelecting) {
         // Finalize box selection
         // Convert box selection start/end to world coordinates for comparison
@@ -516,6 +529,8 @@ canvas.addEventListener('mouseup', (e) => {
         return;
     }
 
+    state.isPotentialMove = false;
+
     if (state.isResizing) {
         saveToHistory();
         state.isResizing = false;
@@ -559,7 +574,7 @@ canvas.addEventListener('mouseup', (e) => {
 
     const newObj = {
         type: state.mode,
-        subtype: state.mode === 'door' ? document.getElementById('door-type').value : null,
+        subtype: state.mode === 'door' ? 'single' : null, // Default to single
         isOpen: false, // Default closed
         x1: state.dragStart.x,
         y1: state.dragStart.y,
@@ -1115,6 +1130,116 @@ function initThree() {
             previewScene.add(mesh);
         }
     });
+}
+
+function togglePropertyPanel() {
+    state.showPropertyPanel = !state.showPropertyPanel;
+    const panel = document.getElementById('property-panel');
+    const btn = document.getElementById('toggle-properties');
+
+    if (state.showPropertyPanel) {
+        panel.classList.remove('hidden');
+        btn.classList.add('active');
+        updatePropertyPanel();
+    } else {
+        panel.classList.add('hidden');
+        btn.classList.remove('active');
+    }
+}
+
+function updatePropertyPanel() {
+    if (!state.showPropertyPanel) return;
+
+    const panel = document.getElementById('property-panel');
+    const doorSection = document.getElementById('prop-door-section');
+
+    if (state.selection.length !== 1) {
+        // Clear inputs or show "No selection" / "Multiple selection"
+        // For now, just hide the content or disable inputs could be better, 
+        // but let's just keep the panel visible but maybe empty or default
+        // Actually, hiding the panel content or showing a message is better
+        // But per requirement "when property window is open AND object selected"
+        // We can just clear values
+        document.getElementById('prop-x').value = '';
+        document.getElementById('prop-y').value = '';
+        document.getElementById('prop-length').value = '';
+        document.getElementById('prop-angle').value = '';
+        doorSection.classList.add('hidden');
+        return;
+    }
+
+    const obj = state.selection[0];
+
+    // Calculate properties
+    const midX = (obj.x1 + obj.x2) / 2;
+    const midY = (obj.y1 + obj.y2) / 2;
+    const dx = obj.x2 - obj.x1;
+    const dy = obj.y2 - obj.y1;
+    const length = Math.hypot(dx, dy);
+    let angle = Math.atan2(dy, dx) * (180 / Math.PI); // Convert to degrees
+    if (angle < 0) angle += 360;
+
+    // Update inputs
+    if (document.activeElement.id !== 'prop-x') document.getElementById('prop-x').value = Math.round(midX);
+    if (document.activeElement.id !== 'prop-y') document.getElementById('prop-y').value = Math.round(midY);
+    if (document.activeElement.id !== 'prop-length') document.getElementById('prop-length').value = Math.round(length);
+    if (document.activeElement.id !== 'prop-angle') document.getElementById('prop-angle').value = Math.round(angle);
+
+    // Door specific
+    if (obj.type === 'door') {
+        doorSection.classList.remove('hidden');
+        document.getElementById('prop-door-type').value = obj.subtype || 'single';
+        document.getElementById('prop-door-open').checked = !!obj.isOpen;
+    } else {
+        doorSection.classList.add('hidden');
+    }
+}
+
+function applyPropertyChange(prop, value) {
+    if (state.selection.length !== 1) return;
+    const obj = state.selection[0];
+
+    if (prop === 'x' || prop === 'y') {
+        const midX = (obj.x1 + obj.x2) / 2;
+        const midY = (obj.y1 + obj.y2) / 2;
+        const dx = prop === 'x' ? value - midX : 0;
+        const dy = prop === 'y' ? value - midY : 0;
+
+        obj.x1 += dx;
+        obj.x2 += dx;
+        obj.y1 += dy;
+        obj.y2 += dy;
+    } else if (prop === 'length') {
+        const currentLen = Math.hypot(obj.x2 - obj.x1, obj.y2 - obj.y1);
+        if (currentLen === 0) return;
+        const scale = value / currentLen;
+        const midX = (obj.x1 + obj.x2) / 2;
+        const midY = (obj.y1 + obj.y2) / 2;
+
+        // Scale around center
+        obj.x1 = midX + (obj.x1 - midX) * scale;
+        obj.y1 = midY + (obj.y1 - midY) * scale;
+        obj.x2 = midX + (obj.x2 - midX) * scale;
+        obj.y2 = midY + (obj.y2 - midY) * scale;
+    } else if (prop === 'angle') {
+        const rad = value * (Math.PI / 180);
+        const currentLen = Math.hypot(obj.x2 - obj.x1, obj.y2 - obj.y1);
+        const midX = (obj.x1 + obj.x2) / 2;
+        const midY = (obj.y1 + obj.y2) / 2;
+
+        obj.x1 = midX - (Math.cos(rad) * currentLen / 2);
+        obj.y1 = midY - (Math.sin(rad) * currentLen / 2);
+        obj.x2 = midX + (Math.cos(rad) * currentLen / 2);
+        obj.y2 = midY + (Math.sin(rad) * currentLen / 2);
+    } else if (prop === 'subtype') {
+        obj.subtype = value;
+    } else if (prop === 'isOpen') {
+        obj.isOpen = value;
+    }
+
+    saveToHistory();
+    draw();
+    updatePropertyPanel();
 }
 
 function getThreeColor(type) {

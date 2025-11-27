@@ -18,12 +18,13 @@
         <button id="add-wall" class="tool-btn">牆壁</button>
         <div class="tool-group">
             <button id="add-door" class="tool-btn">門</button>
-            <select id="door-type" class="tool-select hidden">
+            <!-- Inline controls hidden, moved to property panel -->
+            <select id="door-type" class="tool-select hidden" style="display: none;">
                 <option value="single">單開門</option>
                 <option value="double">雙開門</option>
                 <option value="mother-son">子母門</option>
             </select>
-            <label id="door-open-control" class="tool-checkbox hidden">
+            <label id="door-open-control" class="tool-checkbox hidden" style="display: none;">
                 <input type="checkbox" id="door-open"> 開啟
             </label>
         </div>
@@ -33,6 +34,8 @@
         <button id="undo" class="tool-btn">↶ 復原</button>
         <button id="redo" class="tool-btn">↷ 重做</button>
         <button id="delete" class="tool-btn danger">🗑 刪除</button>
+        <div class="separator"></div>
+        <button id="toggle-properties" class="tool-btn">⚙ 屬性</button>
         <div class="separator"></div>
         <button id="preview-3d" class="tool-btn primary">3D 預覽</button>
         <button id="export" class="tool-btn">匯出</button>
@@ -59,6 +62,44 @@
       }
     }
   </script>
+    <div id="property-panel" class="hidden">
+        <h3>屬性</h3>
+
+        <div class="property-group">
+            <label>位置 X</label>
+            <input type="number" id="prop-x">
+        </div>
+        <div class="property-group">
+            <label>位置 Y</label>
+            <input type="number" id="prop-y">
+        </div>
+        <div class="property-group">
+            <label>長度</label>
+            <input type="number" id="prop-length">
+        </div>
+        <div class="property-group">
+            <label>角度</label>
+            <input type="number" id="prop-angle">
+        </div>
+
+        <div id="prop-door-section" class="hidden">
+            <div class="separator"></div>
+            <div class="property-group">
+                <label>門樣式</label>
+                <select id="prop-door-type" class="tool-select">
+                    <option value="single">單開門</option>
+                    <option value="double">雙開門</option>
+                    <option value="mother-son">子母門</option>
+                </select>
+            </div>
+            <div class="property-group">
+                <label>狀態</label>
+                <label class="tool-checkbox">
+                    <input type="checkbox" id="prop-door-open"> 開啟
+                </label>
+            </div>
+        </div>
+    </div>
     <script type="module" src="app.js"></script>
 </body>
 
