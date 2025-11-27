@@ -921,10 +921,10 @@ function initThree() {
         // position at midpoint
         const midX = (obj.x1 + obj.x2) / 2 - canvas.width / 2;
         const midY = (obj.y1 + obj.y2) / 2 - canvas.height / 2;
-        mesh.position.set(midX, height / 2, -midY);
+        mesh.position.set(midX, height / 2, midY);
         // rotate to match direction
         const angle = Math.atan2(obj.y2 - obj.y1, obj.x2 - obj.x1);
-        mesh.rotation.y = -angle;
+        mesh.rotation.y = -angle; // Correct rotation for y -> z mapping
         previewScene.add(mesh);
     });
 }
