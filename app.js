@@ -20,8 +20,13 @@ const state = {
     isBoxSelecting: false,
     boxSelectionStart: null,
     boxSelectionEnd: null,
+    boxSelectionStart: null,
+    boxSelectionEnd: null,
     history: [],
     historyIndex: -1,
+    scale: 1,
+    offsetX: 0,
+    offsetY: 0,
 };
 
 // ==== Canvas Setup ====
@@ -110,11 +115,57 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+// ==== Coordinate Conversion ====
+function toWorld(screenX, screenY) {
+    return {
+        x: (screenX - state.offsetX) / state.scale,
+        y: (screenY - state.offsetX) / state.scale // Typo fix: offsetY
+    };
+}
+
+// Correct implementation of toWorld
+function screenToWorld(sx, sy) {
+    return {
+        x: (sx - state.offsetX) / state.scale,
+        y: (sy - state.offsetY) / state.scale
+    };
+}
+
+// ==== Zoom & Pan ====
+canvas.addEventListener('wheel', (e) => {
+    if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const zoomIntensity = 0.1;
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        // Get mouse position in world coordinates before zoom
+        const worldPos = screenToWorld(mouseX, mouseY);
+
+        // Update scale
+        const delta = e.deltaY < 0 ? 1 : -1;
+        const newScale = state.scale * (1 + delta * zoomIntensity);
+
+        // Limit scale
+        if (newScale < 0.1 || newScale > 5) return;
+
+        state.scale = newScale;
+
+        // Adjust offset so the mouse point remains in the same world position
+        state.offsetX = mouseX - worldPos.x * state.scale;
+        state.offsetY = mouseY - worldPos.y * state.scale;
+
+        draw();
+    }
+}, { passive: false });
+
 // ==== Mouse Interaction ====
 canvas.addEventListener('mousedown', (e) => {
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    const { x, y } = screenToWorld(screenX, screenY);
 
     if (state.mode) {
         // start drawing a new object
@@ -217,8 +268,12 @@ canvas.addEventListener('mousedown', (e) => {
 
 canvas.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    let { x, y } = screenToWorld(screenX, screenY);
+
+    // Snapping logic
+    const isSnapDisabled = e.ctrlKey || e.metaKey;
 
     // Update cursor based on hover
     if (!state.isDragging && !state.isResizing && !state.isBoxSelecting && !state.isMoving && !state.isRotating) {
@@ -272,8 +327,15 @@ canvas.addEventListener('mousemove', (e) => {
     }
 
     if (state.isMoving) {
-        const dx = x - state.lastMousePos.x;
-        const dy = y - state.lastMousePos.y;
+        let dx = x - state.lastMousePos.x;
+        let dy = y - state.lastMousePos.y;
+
+        // Apply snapping for move
+        if (!isSnapDisabled) {
+            const correction = getMoveSnapCorrection(dx, dy, state.selection);
+            dx += correction.x;
+            dy += correction.y;
+        }
 
         state.selection.forEach(obj => {
             obj.x1 += dx;
@@ -282,7 +344,13 @@ canvas.addEventListener('mousemove', (e) => {
             obj.y2 += dy;
         });
 
-        state.lastMousePos = { x, y };
+        // Update lastMousePos to reflect the actual movement including snap
+        // This prevents drift
+        state.lastMousePos = {
+            x: state.lastMousePos.x + dx,
+            y: state.lastMousePos.y + dy
+        };
+
         draw();
         return;
     }
@@ -296,6 +364,14 @@ canvas.addEventListener('mousemove', (e) => {
     if (state.isResizing && state.selection.length === 1) {
         // Resize the selected object
         const obj = state.selection[0];
+
+        // Apply snapping if enabled
+        if (!isSnapDisabled) {
+            const snapped = getSnappedPoint(x, y, [obj]);
+            x = snapped.x;
+            y = snapped.y;
+        }
+
         if (state.resizeHandle === 'start') {
             obj.x1 = x;
             obj.y1 = y;
@@ -308,6 +384,25 @@ canvas.addEventListener('mousemove', (e) => {
     }
 
     if (!state.isDragging) return;
+
+    // Apply snapping for preview
+    if (!isSnapDisabled) {
+        const snapped = getSnappedPoint(x, y);
+        // If snapped to an object, use that point
+        if (snapped.x !== x || snapped.y !== y) {
+            x = snapped.x;
+            y = snapped.y;
+        } else {
+            // Otherwise apply angle snapping (45 degree increments)
+            const dx = x - state.dragStart.x;
+            const dy = y - state.dragStart.y;
+            const angle = Math.atan2(dy, dx);
+            const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+            const dist = Math.hypot(dx, dy);
+            x = state.dragStart.x + Math.cos(snappedAngle) * dist;
+            y = state.dragStart.y + Math.sin(snappedAngle) * dist;
+        }
+    }
 
     // temporary preview – we just redraw with a provisional object
     draw();
@@ -324,6 +419,9 @@ canvas.addEventListener('mousemove', (e) => {
 canvas.addEventListener('mouseup', (e) => {
     if (state.isBoxSelecting) {
         // Finalize box selection
+        // Convert box selection start/end to world coordinates for comparison
+        // Note: boxSelectionStart/End are already in world coords because we set them using x,y from mousedown/move
+
         const x1 = Math.min(state.boxSelectionStart.x, state.boxSelectionEnd.x);
         const x2 = Math.max(state.boxSelectionStart.x, state.boxSelectionEnd.x);
         const y1 = Math.min(state.boxSelectionStart.y, state.boxSelectionEnd.y);
@@ -378,8 +476,9 @@ canvas.addEventListener('mouseup', (e) => {
 
     if (!state.isDragging) return;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    const { x, y } = screenToWorld(screenX, screenY);
 
     // Minimum length check
     const length = Math.hypot(x - state.dragStart.x, y - state.dragStart.y);
@@ -389,12 +488,32 @@ canvas.addEventListener('mouseup', (e) => {
         return;
     }
 
+    // Apply snapping for the end point of the new object
+    let endX = x;
+    let endY = y;
+    if (!(e.ctrlKey || e.metaKey)) {
+        const snapped = getSnappedPoint(x, y);
+        if (snapped.x !== x || snapped.y !== y) {
+            endX = snapped.x;
+            endY = snapped.y;
+        } else {
+            // Angle snap
+            const dx = x - state.dragStart.x;
+            const dy = y - state.dragStart.y;
+            const angle = Math.atan2(dy, dx);
+            const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+            const dist = Math.hypot(dx, dy);
+            endX = state.dragStart.x + Math.cos(snappedAngle) * dist;
+            endY = state.dragStart.y + Math.sin(snappedAngle) * dist;
+        }
+    }
+
     const newObj = {
         type: state.mode,
         x1: state.dragStart.x,
         y1: state.dragStart.y,
-        x2: x,
-        y2: y,
+        x2: endX,
+        y2: endY,
     };
     state.objects.push(newObj);
     saveToHistory();
@@ -433,11 +552,11 @@ function pointInObject(px, py, obj) {
     const dy = py - yy;
     const distance = Math.sqrt(dx * dx + dy * dy);
 
-    return distance < 8;
+    return distance < 8 / state.scale; // Adjust hit area for zoom
 }
 
 function getResizeHandle(px, py, obj) {
-    const handleSize = 10;
+    const handleSize = 10 / state.scale; // Adjust handle size for zoom
     const dist1 = Math.hypot(px - obj.x1, py - obj.y1);
     const dist2 = Math.hypot(px - obj.x2, py - obj.y2);
 
@@ -446,15 +565,106 @@ function getResizeHandle(px, py, obj) {
     return null;
 }
 
+// ==== Snapping Logic ====
+function getSnappedPoint(x, y, excludeObjects = []) {
+    const snapThreshold = 15 / state.scale;
+    let snappedX = x;
+    let snappedY = y;
+    let minDist = snapThreshold;
+
+    state.objects.forEach(obj => {
+        if (excludeObjects.includes(obj)) return;
+
+        // Check start point
+        const d1 = Math.hypot(x - obj.x1, y - obj.y1);
+        if (d1 < minDist) {
+            minDist = d1;
+            snappedX = obj.x1;
+            snappedY = obj.y1;
+        }
+
+        // Check end point
+        const d2 = Math.hypot(x - obj.x2, y - obj.y2);
+        if (d2 < minDist) {
+            minDist = d2;
+            snappedX = obj.x2;
+            snappedY = obj.y2;
+        }
+    });
+
+    return { x: snappedX, y: snappedY };
+}
+
+function getMoveSnapCorrection(dx, dy, selection) {
+    const snapThreshold = 15 / state.scale;
+    let correctionX = 0;
+    let correctionY = 0;
+    let minDist = snapThreshold;
+
+    // We check if any endpoint of the selection snaps to any endpoint of unselected objects
+    // after applying dx, dy
+
+    const unselected = state.objects.filter(obj => !selection.includes(obj));
+
+    if (unselected.length === 0) return { x: 0, y: 0 };
+
+    for (const selObj of selection) {
+        // Proposed new positions
+        const p1x = selObj.x1 + dx;
+        const p1y = selObj.y1 + dy;
+        const p2x = selObj.x2 + dx;
+        const p2y = selObj.y2 + dy;
+
+        for (const target of unselected) {
+            // Check p1 against target endpoints
+            const d1_t1 = Math.hypot(p1x - target.x1, p1y - target.y1);
+            if (d1_t1 < minDist) {
+                minDist = d1_t1;
+                correctionX = target.x1 - p1x;
+                correctionY = target.y1 - p1y;
+            }
+
+            const d1_t2 = Math.hypot(p1x - target.x2, p1y - target.y2);
+            if (d1_t2 < minDist) {
+                minDist = d1_t2;
+                correctionX = target.x2 - p1x;
+                correctionY = target.y2 - p1y;
+            }
+
+            // Check p2 against target endpoints
+            const d2_t1 = Math.hypot(p2x - target.x1, p2y - target.y1);
+            if (d2_t1 < minDist) {
+                minDist = d2_t1;
+                correctionX = target.x1 - p2x;
+                correctionY = target.y1 - p2y;
+            }
+
+            const d2_t2 = Math.hypot(p2x - target.x2, p2y - target.y2);
+            if (d2_t2 < minDist) {
+                minDist = d2_t2;
+                correctionX = target.x2 - p2x;
+                correctionY = target.y2 - p2y;
+            }
+        }
+    }
+
+    return { x: correctionX, y: correctionY };
+}
+
 function draw() {
     // clear
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.translate(state.offsetX, state.offsetY);
+    ctx.scale(state.scale, state.scale);
+
     // draw grid
     drawGrid();
     // draw objects
     state.objects.forEach(obj => {
         ctx.strokeStyle = getColorForType(obj.type);
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 3 / state.scale; // Keep outline width constant visually
         ctx.beginPath();
         ctx.moveTo(obj.x1, obj.y1);
         ctx.lineTo(obj.x2, obj.y2);
@@ -463,8 +673,8 @@ function draw() {
     // highlight selected
     state.selection.forEach(obj => {
         ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 4;
-        ctx.setLineDash([4, 2]);
+        ctx.lineWidth = 4 / state.scale; // Keep outline width constant visually
+        ctx.setLineDash([4 / state.scale, 2 / state.scale]);
         ctx.beginPath();
         ctx.moveTo(obj.x1, obj.y1);
         ctx.lineTo(obj.x2, obj.y2);
@@ -474,9 +684,10 @@ function draw() {
         // Draw resize handles only if single selection
         if (state.selection.length === 1) {
             ctx.fillStyle = '#fff';
+            const handleSize = 5 / state.scale;
             ctx.beginPath();
-            ctx.arc(obj.x1, obj.y1, 5, 0, Math.PI * 2);
-            ctx.arc(obj.x2, obj.y2, 5, 0, Math.PI * 2);
+            ctx.arc(obj.x1, obj.y1, handleSize, 0, Math.PI * 2);
+            ctx.arc(obj.x2, obj.y2, handleSize, 0, Math.PI * 2);
             ctx.fill();
         }
     });
@@ -490,9 +701,48 @@ function draw() {
 
         ctx.fillStyle = 'rgba(0, 255, 204, 0.1)';
         ctx.strokeStyle = 'rgba(0, 255, 204, 0.5)';
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1 / state.scale;
         ctx.fillRect(x, y, w, h);
         ctx.strokeRect(x, y, w, h);
+    }
+
+    // Draw rotation center for visual feedback
+    if (state.isRotating && state.rotationCenter) {
+        ctx.fillStyle = '#ff0';
+        ctx.beginPath();
+        ctx.arc(state.rotationCenter.x, state.rotationCenter.y, 4 / state.scale, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    ctx.restore();
+}
+
+function drawGrid() {
+    // Calculate visible area in world coordinates
+    const left = -state.offsetX / state.scale;
+    const top = -state.offsetY / state.scale;
+    const right = (canvas.width - state.offsetX) / state.scale;
+    const bottom = (canvas.height - state.offsetY) / state.scale;
+
+    const step = 40; // 40px grid spacing
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1 / state.scale;
+
+    // Snap start to grid
+    const startX = Math.floor(left / step) * step;
+    const startY = Math.floor(top / step) * step;
+
+    for (let x = startX; x < right; x += step) {
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
+        ctx.stroke();
+    }
+    for (let y = startY; y < bottom; y += step) {
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
     }
 }
 
@@ -554,23 +804,7 @@ function deleteSelected() {
     }
 }
 
-function drawGrid() {
-    const step = 40; // 40px grid spacing
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < canvas.width; x += step) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
-        ctx.stroke();
-    }
-    for (let y = 0; y < canvas.height; y += step) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
-    }
-}
+
 
 function getColorForType(type) {
     switch (type) {
