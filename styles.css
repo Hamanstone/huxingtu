@@ -73,6 +73,32 @@ button.tool-btn.danger:hover {
     background: hsl(0, 70%, 50%);
 }
 
+.tool-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.tool-select {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    padding: 0.5rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    outline: none;
+    cursor: pointer;
+}
+
+.tool-select option {
+    background: #2a2a2a;
+    color: #fff;
+}
+
+.tool-select.hidden {
+    display: none;
+}
+
 button.tool-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;

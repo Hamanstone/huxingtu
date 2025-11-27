@@ -69,6 +69,14 @@ function setMode(mode) {
     state.mode = mode;
     state.selection = [];
     updateToolbar();
+
+    // Show/hide door type select
+    const doorSelect = document.getElementById('door-type');
+    if (mode === 'door') {
+        doorSelect.classList.remove('hidden');
+    } else {
+        doorSelect.classList.add('hidden');
+    }
 }
 
 function updateToolbar() {
@@ -510,6 +518,7 @@ canvas.addEventListener('mouseup', (e) => {
 
     const newObj = {
         type: state.mode,
+        subtype: state.mode === 'door' ? document.getElementById('door-type').value : null,
         x1: state.dragStart.x,
         y1: state.dragStart.y,
         x2: endX,
@@ -662,13 +671,19 @@ function draw() {
     // draw grid
     drawGrid();
     // draw objects
+    // draw objects
     state.objects.forEach(obj => {
         ctx.strokeStyle = getColorForType(obj.type);
         ctx.lineWidth = 3 / state.scale; // Keep outline width constant visually
-        ctx.beginPath();
-        ctx.moveTo(obj.x1, obj.y1);
-        ctx.lineTo(obj.x2, obj.y2);
-        ctx.stroke();
+
+        if (obj.type === 'door') {
+            drawDoor(obj);
+        } else {
+            ctx.beginPath();
+            ctx.moveTo(obj.x1, obj.y1);
+            ctx.lineTo(obj.x2, obj.y2);
+            ctx.stroke();
+        }
     });
     // highlight selected
     state.selection.forEach(obj => {
@@ -806,6 +821,60 @@ function deleteSelected() {
 
 
 
+function drawDoor(obj) {
+    const dx = obj.x2 - obj.x1;
+    const dy = obj.y2 - obj.y1;
+    const length = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx);
+
+    ctx.save();
+    ctx.translate(obj.x1, obj.y1);
+    ctx.rotate(angle);
+
+    // Draw door frame (line)
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(length, 0);
+    ctx.stroke();
+
+    // Draw door swing based on subtype
+    ctx.lineWidth = 1 / state.scale;
+    ctx.beginPath();
+
+    if (obj.subtype === 'double') {
+        // Double door: two leaves meeting in center
+        const leafLen = length / 2;
+        // Left leaf
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, leafLen);
+        ctx.arc(0, 0, leafLen, 0, Math.PI / 2);
+        // Right leaf
+        ctx.moveTo(length, 0);
+        ctx.lineTo(length, leafLen);
+        ctx.arc(length, 0, leafLen, Math.PI, Math.PI / 2, true);
+    } else if (obj.subtype === 'mother-son') {
+        // Mother-Son: unequal leaves (e.g. 70/30)
+        const bigLen = length * 0.7;
+        const smallLen = length * 0.3;
+        // Big leaf (left)
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, bigLen);
+        ctx.arc(0, 0, bigLen, 0, Math.PI / 2);
+        // Small leaf (right)
+        ctx.moveTo(length, 0);
+        ctx.lineTo(length, smallLen);
+        ctx.arc(length, 0, smallLen, Math.PI, Math.PI / 2, true);
+    } else {
+        // Single door (default)
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, length);
+        ctx.arc(0, 0, length, 0, Math.PI / 2);
+    }
+
+    ctx.stroke();
+    ctx.restore();
+}
+
 function getColorForType(type) {
     switch (type) {
         case 'wall': return 'hsl(170, 60%, 45%)';
@@ -908,24 +977,92 @@ function initThree() {
         const length = Math.hypot(obj.x2 - obj.x1, obj.y2 - obj.y1);
         const height = obj.type === 'wall' ? 80 : (obj.type === 'door' ? 60 : 40);
         const thickness = obj.type === 'wall' ? 8 : 5;
-        const geometry = new THREE.BoxGeometry(length, height, thickness);
-        const material = new THREE.MeshStandardMaterial({
-            color: getThreeColor(obj.type),
-            roughness: 0.7,
-            metalness: 0.3
-        });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
 
         // position at midpoint
         const midX = (obj.x1 + obj.x2) / 2 - canvas.width / 2;
         const midY = (obj.y1 + obj.y2) / 2 - canvas.height / 2;
-        mesh.position.set(midX, height / 2, midY);
-        // rotate to match direction
         const angle = Math.atan2(obj.y2 - obj.y1, obj.x2 - obj.x1);
-        mesh.rotation.y = -angle; // Correct rotation for y -> z mapping
-        previewScene.add(mesh);
+
+        if (obj.type === 'door') {
+            const mat = new THREE.MeshStandardMaterial({
+                color: getThreeColor(obj.type),
+                roughness: 0.7,
+                metalness: 0.3
+            });
+
+            if (obj.subtype === 'double') {
+                const leafLen = length / 2;
+                // Left leaf
+                const g1 = new THREE.BoxGeometry(leafLen, height, thickness);
+                const m1 = new THREE.Mesh(g1, mat);
+                // Offset from center: move left by leafLen/2
+                // We need to calculate world pos for two leaves
+                // Easier to create a group or calculate offsets
+                // Let's just place two meshes
+
+                // Local offset for left leaf center: -leafLen/2
+                const dx1 = -leafLen / 2 * Math.cos(angle);
+                const dy1 = -leafLen / 2 * Math.sin(angle);
+                m1.position.set(midX + dx1, height / 2, midY + dy1);
+                m1.rotation.y = -angle;
+                previewScene.add(m1);
+
+                // Right leaf
+                const m2 = new THREE.Mesh(g1, mat);
+                const dx2 = leafLen / 2 * Math.cos(angle);
+                const dy2 = leafLen / 2 * Math.sin(angle);
+                m2.position.set(midX + dx2, height / 2, midY + dy2);
+                m2.rotation.y = -angle;
+                previewScene.add(m2);
+
+            } else if (obj.subtype === 'mother-son') {
+                const bigLen = length * 0.7;
+                const smallLen = length * 0.3;
+
+                // Big leaf (left)
+                const g1 = new THREE.BoxGeometry(bigLen, height, thickness);
+                const m1 = new THREE.Mesh(g1, mat);
+                // Center of big leaf is at -length/2 + bigLen/2 = -0.15 length
+                const offset1 = -length / 2 + bigLen / 2;
+                const dx1 = offset1 * Math.cos(angle);
+                const dy1 = offset1 * Math.sin(angle);
+                m1.position.set(midX + dx1, height / 2, midY + dy1);
+                m1.rotation.y = -angle;
+                previewScene.add(m1);
+
+                // Small leaf (right)
+                const g2 = new THREE.BoxGeometry(smallLen, height, thickness);
+                const m2 = new THREE.Mesh(g2, mat);
+                // Center of small leaf is at length/2 - smallLen/2 = 0.35 length
+                const offset2 = length / 2 - smallLen / 2;
+                const dx2 = offset2 * Math.cos(angle);
+                const dy2 = offset2 * Math.sin(angle);
+                m2.position.set(midX + dx2, height / 2, midY + dy2);
+                m2.rotation.y = -angle;
+                previewScene.add(m2);
+            } else {
+                // Single
+                const geometry = new THREE.BoxGeometry(length, height, thickness);
+                const mesh = new THREE.Mesh(geometry, mat);
+                mesh.position.set(midX, height / 2, midY);
+                mesh.rotation.y = -angle;
+                previewScene.add(mesh);
+            }
+        } else {
+            // Wall, Window, Furniture
+            const geometry = new THREE.BoxGeometry(length, height, thickness);
+            const material = new THREE.MeshStandardMaterial({
+                color: getThreeColor(obj.type),
+                roughness: 0.7,
+                metalness: 0.3
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.position.set(midX, height / 2, midY);
+            mesh.rotation.y = -angle;
+            previewScene.add(mesh);
+        }
     });
 }
 

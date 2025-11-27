@@ -16,7 +16,14 @@
         <button id="select-mode" class="tool-btn active">↖ 選取</button>
         <div class="separator"></div>
         <button id="add-wall" class="tool-btn">牆壁</button>
-        <button id="add-door" class="tool-btn">門</button>
+        <div class="tool-group">
+            <button id="add-door" class="tool-btn">門</button>
+            <select id="door-type" class="tool-select hidden">
+                <option value="single">單開門</option>
+                <option value="double">雙開門</option>
+                <option value="mother-son">子母門</option>
+            </select>
+        </div>
         <button id="add-window" class="tool-btn">窗戶</button>
         <button id="add-furniture" class="tool-btn">家具</button>
         <div class="separator"></div>
