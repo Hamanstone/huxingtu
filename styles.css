@@ -254,3 +254,7 @@ canvas#floorplan-canvas {
 .close:hover {
     color: var(--color-text);
 }
+
+.hidden {
+    display: none !important;
+}
