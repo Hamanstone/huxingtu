@@ -652,24 +652,24 @@ function getSnappedPoint(x, y, excludeObjects = []) {
     let snappedY = y;
     let minDist = snapThreshold;
 
+    const consider = (px, py, dist) => {
+        if (dist < minDist) {
+            minDist = dist;
+            snappedX = px;
+            snappedY = py;
+        }
+    };
+
     state.objects.forEach(obj => {
         if (excludeObjects.includes(obj)) return;
 
-        // Check start point
-        const d1 = Math.hypot(x - obj.x1, y - obj.y1);
-        if (d1 < minDist) {
-            minDist = d1;
-            snappedX = obj.x1;
-            snappedY = obj.y1;
-        }
+        // Endpoints
+        consider(obj.x1, obj.y1, Math.hypot(x - obj.x1, y - obj.y1));
+        consider(obj.x2, obj.y2, Math.hypot(x - obj.x2, y - obj.y2));
 
-        // Check end point
-        const d2 = Math.hypot(x - obj.x2, y - obj.y2);
-        if (d2 < minDist) {
-            minDist = d2;
-            snappedX = obj.x2;
-            snappedY = obj.y2;
-        }
+        // Any point along the segment
+        const snap = closestPointOnSegment(x, y, obj.x1, obj.y1, obj.x2, obj.y2);
+        consider(snap.x, snap.y, snap.dist);
     });
 
     return { x: snappedX, y: snappedY };
@@ -681,49 +681,29 @@ function getMoveSnapCorrection(dx, dy, selection) {
     let correctionY = 0;
     let minDist = snapThreshold;
 
-    // We check if any endpoint of the selection snaps to any endpoint of unselected objects
-    // after applying dx, dy
-
     const unselected = state.objects.filter(obj => !selection.includes(obj));
 
     if (unselected.length === 0) return { x: 0, y: 0 };
 
     for (const selObj of selection) {
-        // Proposed new positions
         const p1x = selObj.x1 + dx;
         const p1y = selObj.y1 + dy;
         const p2x = selObj.x2 + dx;
         const p2y = selObj.y2 + dy;
 
         for (const target of unselected) {
-            // Check p1 against target endpoints
-            const d1_t1 = Math.hypot(p1x - target.x1, p1y - target.y1);
-            if (d1_t1 < minDist) {
-                minDist = d1_t1;
-                correctionX = target.x1 - p1x;
-                correctionY = target.y1 - p1y;
+            const snapP1 = closestPointOnSegment(p1x, p1y, target.x1, target.y1, target.x2, target.y2);
+            if (snapP1.dist < minDist) {
+                minDist = snapP1.dist;
+                correctionX = snapP1.x - p1x;
+                correctionY = snapP1.y - p1y;
             }
 
-            const d1_t2 = Math.hypot(p1x - target.x2, p1y - target.y2);
-            if (d1_t2 < minDist) {
-                minDist = d1_t2;
-                correctionX = target.x2 - p1x;
-                correctionY = target.y2 - p1y;
-            }
-
-            // Check p2 against target endpoints
-            const d2_t1 = Math.hypot(p2x - target.x1, p2y - target.y1);
-            if (d2_t1 < minDist) {
-                minDist = d2_t1;
-                correctionX = target.x1 - p2x;
-                correctionY = target.y1 - p2y;
-            }
-
-            const d2_t2 = Math.hypot(p2x - target.x2, p2y - target.y2);
-            if (d2_t2 < minDist) {
-                minDist = d2_t2;
-                correctionX = target.x2 - p2x;
-                correctionY = target.y2 - p2y;
+            const snapP2 = closestPointOnSegment(p2x, p2y, target.x1, target.y1, target.x2, target.y2);
+            if (snapP2.dist < minDist) {
+                minDist = snapP2.dist;
+                correctionX = snapP2.x - p2x;
+                correctionY = snapP2.y - p2y;
             }
         }
     }
@@ -1267,6 +1247,22 @@ function pointToLineDistance(px, py, x1, y1, x2, y2) {
     const len = Math.hypot(dx, dy);
     if (len < 1e-6) return Infinity;
     return Math.abs((px - x1) * dy - (py - y1) * dx) / len;
+}
+
+function closestPointOnSegment(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-6) {
+        return { x: x1, y: y1, dist: Math.hypot(px - x1, py - y1) };
+    }
+
+    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+
+    const cx = x1 + t * dx;
+    const cy = y1 + t * dy;
+    return { x: cx, y: cy, dist: Math.hypot(px - cx, py - cy) };
 }
 
 function areSegmentsCollinear(segA, segB, tolerance = 6) {
