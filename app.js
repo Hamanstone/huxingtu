@@ -47,6 +47,13 @@ document.getElementById('add-wall').onclick = () => setMode('wall');
 document.getElementById('add-door').onclick = () => setMode('door');
 document.getElementById('add-window').onclick = () => setMode('window');
 document.getElementById('add-furniture').onclick = () => setMode('furniture');
+document.getElementById('door-open').onchange = (e) => {
+    if (state.selection.length === 1 && state.selection[0].type === 'door') {
+        state.selection[0].isOpen = e.target.checked;
+        saveToHistory();
+        draw(); // Redraw (though 2D might not change, good practice)
+    }
+};
 
 document.getElementById('preview-3d').onclick = open3DPreview;
 document.getElementById('export').onclick = exportFloorplan;
@@ -95,6 +102,17 @@ function updateToolbar() {
     undoBtn.disabled = state.historyIndex < 0;
     redoBtn.disabled = state.historyIndex >= state.history.length - 1;
     deleteBtn.disabled = state.selection.length === 0;
+
+    // Update door open checkbox
+    const doorOpenControl = document.getElementById('door-open-control');
+    const doorOpenInput = document.getElementById('door-open');
+
+    if (state.selection.length === 1 && state.selection[0].type === 'door') {
+        doorOpenControl.classList.remove('hidden');
+        doorOpenInput.checked = !!state.selection[0].isOpen;
+    } else {
+        doorOpenControl.classList.add('hidden');
+    }
 }
 
 // Keyboard shortcuts
@@ -376,8 +394,31 @@ canvas.addEventListener('mousemove', (e) => {
         // Apply snapping if enabled
         if (!isSnapDisabled) {
             const snapped = getSnappedPoint(x, y, [obj]);
-            x = snapped.x;
-            y = snapped.y;
+
+            // Check if object snapping occurred
+            if (snapped.x !== x || snapped.y !== y) {
+                x = snapped.x;
+                y = snapped.y;
+            } else {
+                // Apply angle snapping relative to the fixed point
+                let fixedX, fixedY;
+                if (state.resizeHandle === 'start') {
+                    fixedX = obj.x2;
+                    fixedY = obj.y2;
+                } else {
+                    fixedX = obj.x1;
+                    fixedY = obj.y1;
+                }
+
+                const dx = x - fixedX;
+                const dy = y - fixedY;
+                const angle = Math.atan2(dy, dx);
+                const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+                const dist = Math.hypot(dx, dy);
+
+                x = fixedX + Math.cos(snappedAngle) * dist;
+                y = fixedY + Math.sin(snappedAngle) * dist;
+            }
         }
 
         if (state.resizeHandle === 'start') {
@@ -519,6 +560,7 @@ canvas.addEventListener('mouseup', (e) => {
     const newObj = {
         type: state.mode,
         subtype: state.mode === 'door' ? document.getElementById('door-type').value : null,
+        isOpen: false, // Default closed
         x1: state.dragStart.x,
         y1: state.dragStart.y,
         x2: endX,
@@ -990,63 +1032,72 @@ function initThree() {
                 metalness: 0.3
             });
 
+            // Create a pivot group for the door to handle rotation
+            const doorGroup = new THREE.Group();
+            doorGroup.position.set(midX, 0, midY);
+            doorGroup.rotation.y = -angle;
+            previewScene.add(doorGroup);
+
             if (obj.subtype === 'double') {
                 const leafLen = length / 2;
-                // Left leaf
+
+                // Left leaf group (pivot at left edge)
+                const leftGroup = new THREE.Group();
+                leftGroup.position.set(-length / 2, 0, 0); // Pivot at left end
+                if (obj.isOpen) leftGroup.rotation.y = -Math.PI / 2; // Open outwards/inwards
+
                 const g1 = new THREE.BoxGeometry(leafLen, height, thickness);
                 const m1 = new THREE.Mesh(g1, mat);
-                // Offset from center: move left by leafLen/2
-                // We need to calculate world pos for two leaves
-                // Easier to create a group or calculate offsets
-                // Let's just place two meshes
+                m1.position.set(leafLen / 2, height / 2, 0); // Center mesh relative to pivot
+                leftGroup.add(m1);
+                doorGroup.add(leftGroup);
 
-                // Local offset for left leaf center: -leafLen/2
-                const dx1 = -leafLen / 2 * Math.cos(angle);
-                const dy1 = -leafLen / 2 * Math.sin(angle);
-                m1.position.set(midX + dx1, height / 2, midY + dy1);
-                m1.rotation.y = -angle;
-                previewScene.add(m1);
+                // Right leaf group (pivot at right edge)
+                const rightGroup = new THREE.Group();
+                rightGroup.position.set(length / 2, 0, 0); // Pivot at right end
+                if (obj.isOpen) rightGroup.rotation.y = Math.PI / 2;
 
-                // Right leaf
                 const m2 = new THREE.Mesh(g1, mat);
-                const dx2 = leafLen / 2 * Math.cos(angle);
-                const dy2 = leafLen / 2 * Math.sin(angle);
-                m2.position.set(midX + dx2, height / 2, midY + dy2);
-                m2.rotation.y = -angle;
-                previewScene.add(m2);
+                m2.position.set(-leafLen / 2, height / 2, 0); // Center mesh relative to pivot
+                rightGroup.add(m2);
+                doorGroup.add(rightGroup);
 
             } else if (obj.subtype === 'mother-son') {
                 const bigLen = length * 0.7;
                 const smallLen = length * 0.3;
 
                 // Big leaf (left)
+                const leftGroup = new THREE.Group();
+                leftGroup.position.set(-length / 2, 0, 0);
+                if (obj.isOpen) leftGroup.rotation.y = -Math.PI / 2;
+
                 const g1 = new THREE.BoxGeometry(bigLen, height, thickness);
                 const m1 = new THREE.Mesh(g1, mat);
-                // Center of big leaf is at -length/2 + bigLen/2 = -0.15 length
-                const offset1 = -length / 2 + bigLen / 2;
-                const dx1 = offset1 * Math.cos(angle);
-                const dy1 = offset1 * Math.sin(angle);
-                m1.position.set(midX + dx1, height / 2, midY + dy1);
-                m1.rotation.y = -angle;
-                previewScene.add(m1);
+                m1.position.set(bigLen / 2, height / 2, 0);
+                leftGroup.add(m1);
+                doorGroup.add(leftGroup);
 
                 // Small leaf (right)
+                const rightGroup = new THREE.Group();
+                rightGroup.position.set(length / 2, 0, 0);
+                if (obj.isOpen) rightGroup.rotation.y = Math.PI / 2;
+
                 const g2 = new THREE.BoxGeometry(smallLen, height, thickness);
                 const m2 = new THREE.Mesh(g2, mat);
-                // Center of small leaf is at length/2 - smallLen/2 = 0.35 length
-                const offset2 = length / 2 - smallLen / 2;
-                const dx2 = offset2 * Math.cos(angle);
-                const dy2 = offset2 * Math.sin(angle);
-                m2.position.set(midX + dx2, height / 2, midY + dy2);
-                m2.rotation.y = -angle;
-                previewScene.add(m2);
+                m2.position.set(-smallLen / 2, height / 2, 0);
+                rightGroup.add(m2);
+                doorGroup.add(rightGroup);
             } else {
                 // Single
+                const pivotGroup = new THREE.Group();
+                pivotGroup.position.set(-length / 2, 0, 0); // Pivot at left end (start point)
+                if (obj.isOpen) pivotGroup.rotation.y = -Math.PI / 2;
+
                 const geometry = new THREE.BoxGeometry(length, height, thickness);
                 const mesh = new THREE.Mesh(geometry, mat);
-                mesh.position.set(midX, height / 2, midY);
-                mesh.rotation.y = -angle;
-                previewScene.add(mesh);
+                mesh.position.set(length / 2, height / 2, 0); // Center mesh relative to pivot
+                pivotGroup.add(mesh);
+                doorGroup.add(pivotGroup);
             }
         } else {
             // Wall, Window, Furniture

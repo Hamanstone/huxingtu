@@ -99,6 +99,27 @@ button.tool-btn.danger:hover {
     display: none;
 }
 
+.tool-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: #fff;
+    font-size: 0.9rem;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 0.5rem;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.tool-checkbox.hidden {
+    display: none;
+}
+
+.tool-checkbox input {
+    cursor: pointer;
+}
+
 button.tool-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
