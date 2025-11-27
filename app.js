@@ -81,6 +81,8 @@ document.body.appendChild(importInput);
 const contextMenu = document.getElementById('context-menu');
 const menuCopy = document.getElementById('menu-copy');
 const menuPaste = document.getElementById('menu-paste');
+const menuFlipH = document.getElementById('menu-flip-h');
+const menuFlipV = document.getElementById('menu-flip-v');
 const menuDelete = document.getElementById('menu-delete');
 
 canvas.addEventListener('contextmenu', (e) => {
@@ -105,6 +107,8 @@ document.addEventListener('keydown', (e) => {
 
 menuCopy.onclick = () => { hideContextMenu(); copySelection(); };
 menuPaste.onclick = () => { hideContextMenu(); pasteClipboard(); };
+menuFlipH.onclick = () => { hideContextMenu(); flipSelection('horizontal'); };
+menuFlipV.onclick = () => { hideContextMenu(); flipSelection('vertical'); };
 menuDelete.onclick = () => { hideContextMenu(); deleteSelected(); };
 
 function setMode(mode) {
@@ -830,6 +834,8 @@ function updateContextMenuState() {
     const hasSelection = state.selection.length > 0;
     menuCopy.disabled = !hasSelection;
     menuDelete.disabled = !hasSelection;
+    menuFlipH.disabled = !hasSelection;
+    menuFlipV.disabled = !hasSelection;
     menuPaste.disabled = state.clipboard.length === 0;
 }
 
@@ -868,6 +874,37 @@ function pasteClipboard() {
 
     state.objects.push(...clones);
     state.selection = clones;
+    saveToHistory();
+    draw();
+    updateToolbar();
+}
+
+function flipSelection(axis) {
+    if (state.selection.length === 0) return;
+
+    // 若有右鍵位置，使用該點當翻轉軸，否則用選取區中心
+    let anchor = state.lastContextWorld;
+    if (!anchor) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        state.selection.forEach(obj => {
+            minX = Math.min(minX, obj.x1, obj.x2);
+            minY = Math.min(minY, obj.y1, obj.y2);
+            maxX = Math.max(maxX, obj.x1, obj.x2);
+            maxY = Math.max(maxY, obj.y1, obj.y2);
+        });
+        anchor = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    }
+
+    state.selection.forEach(obj => {
+        if (axis === 'horizontal') {
+            obj.x1 = 2 * anchor.x - obj.x1;
+            obj.x2 = 2 * anchor.x - obj.x2;
+        } else if (axis === 'vertical') {
+            obj.y1 = 2 * anchor.y - obj.y1;
+            obj.y2 = 2 * anchor.y - obj.y2;
+        }
+    });
+
     saveToHistory();
     draw();
     updateToolbar();
