@@ -43,6 +43,8 @@ resizeCanvas();
 // ==== Toolbar Handlers ====
 document.getElementById('select-mode').onclick = () => setMode(null);
 document.getElementById('add-wall').onclick = () => setMode('wall');
+document.getElementById('add-door').onclick = () => setMode('door');
+document.getElementById('add-window').onclick = () => setMode('window');
 document.getElementById('add-furniture').onclick = () => setMode('furniture');
 
 // Property Panel Events
@@ -523,6 +525,11 @@ window.addEventListener('mouseup', (e) => {
     }
 
     if (state.isMoving) {
+        // Check for splitting
+        if (state.selection.length === 1) {
+            checkAndSplitObjects(state.selection[0]);
+        }
+
         saveToHistory();
         state.isMoving = false;
         state.lastMousePos = null;
@@ -582,11 +589,17 @@ window.addEventListener('mouseup', (e) => {
         y2: endY,
     };
     state.objects.push(newObj);
-    saveToHistory();
+
+    // Check for splitting
+    checkAndSplitObjects(newObj);
+
+    saveToHistory(); // Save after creating a new object;
     state.isDragging = false;
     state.dragStart = null;
     draw();
 });
+
+
 
 function pointInObject(px, py, obj) {
     // Distance from point to line segment
@@ -1240,6 +1253,127 @@ function applyPropertyChange(prop, value) {
     saveToHistory();
     draw();
     updatePropertyPanel();
+}
+
+// ==== Object Splitting Logic ====
+function checkAndSplitObjects(activeObj) {
+    // Only split walls for now
+    // activeObj can be window, door, or another wall (though wall-in-wall is rare)
+    // We iterate through all objects to find a wall that contains activeObj
+
+    const newObjects = [];
+    let splitOccurred = false;
+
+    state.objects.forEach(otherObj => {
+        if (otherObj === activeObj) return;
+        if (otherObj.type !== 'wall') return; // Only split walls
+
+        if (areCollinear(otherObj, activeObj) && isContained(activeObj, otherObj)) {
+            // Split otherObj
+            splitOccurred = true;
+
+            // We need to determine which end of activeObj is closer to otherObj.x1/y1
+            // to correctly assign the segments.
+            // Since they are collinear and contained, we can project points onto the line.
+
+            // Let's assume the direction from otherObj.x1,y1 to otherObj.x2,y2 is positive.
+            // We find the "start" and "end" of activeObj relative to this direction.
+
+            const dX = otherObj.x2 - otherObj.x1;
+            const dY = otherObj.y2 - otherObj.y1;
+            const wallLenSq = dX * dX + dY * dY;
+
+            // Project activeObj points
+            const t1 = ((activeObj.x1 - otherObj.x1) * dX + (activeObj.y1 - otherObj.y1) * dY) / wallLenSq;
+            const t2 = ((activeObj.x2 - otherObj.x1) * dX + (activeObj.y2 - otherObj.y1) * dY) / wallLenSq;
+
+            const tStart = Math.min(t1, t2);
+            const tEnd = Math.max(t1, t2);
+
+            // activeObj is between tStart and tEnd (0 to 1 scale of otherObj)
+
+            // Segment 1: otherObj start to activeObj start
+            // We modify otherObj to be this segment
+            // New End Point for otherObj:
+            const newX1 = otherObj.x1 + tStart * dX;
+            const newY1 = otherObj.y1 + tStart * dY;
+
+            // Segment 2: activeObj end to otherObj end
+            // We create a new object for this
+            // New Start Point for newObj:
+            const newX2 = otherObj.x1 + tEnd * dX;
+            const newY2 = otherObj.y1 + tEnd * dY;
+
+            const segment2 = {
+                type: 'wall',
+                x1: newX2,
+                y1: newY2,
+                x2: otherObj.x2,
+                y2: otherObj.y2
+            };
+
+            // Update otherObj (Segment 1)
+            otherObj.x2 = newX1;
+            otherObj.y2 = newY1;
+
+            newObjects.push(segment2);
+        }
+    });
+
+    if (splitOccurred) {
+        state.objects.push(...newObjects);
+    }
+
+    return splitOccurred;
+}
+
+function areCollinear(obj1, obj2) {
+    // Check if obj2 is on the line defined by obj1
+    // Using cross product method
+    const threshold = 1; // Pixel threshold for collinearity
+
+    // Line 1 vector
+    const dx1 = obj1.x2 - obj1.x1;
+    const dy1 = obj1.y2 - obj1.y1;
+
+    // Vector from obj1.p1 to obj2.p1
+    const dx2 = obj2.x1 - obj1.x1;
+    const dy2 = obj2.y1 - obj1.y1;
+
+    // Vector from obj1.p1 to obj2.p2
+    const dx3 = obj2.x2 - obj1.x1;
+    const dy3 = obj2.y2 - obj1.y1;
+
+    // Cross products
+    const cp1 = Math.abs(dx1 * dy2 - dy1 * dx2);
+    const cp2 = Math.abs(dx1 * dy3 - dy1 * dx3);
+
+    // Normalize by length of obj1 to get distance
+    const len1 = Math.hypot(dx1, dy1);
+
+    return (cp1 / len1) < threshold && (cp2 / len1) < threshold;
+}
+
+function isContained(inner, outer) {
+    // Assumes collinearity is already checked
+    // Check if inner segment is within outer segment
+    // We project points onto the outer line segment (0 to 1)
+
+    const dx = outer.x2 - outer.x1;
+    const dy = outer.y2 - outer.y1;
+    const lenSq = dx * dx + dy * dy;
+
+    const t1 = ((inner.x1 - outer.x1) * dx + (inner.y1 - outer.y1) * dy) / lenSq;
+    const t2 = ((inner.x2 - outer.x1) * dx + (inner.y2 - outer.y1) * dy) / lenSq;
+
+    const minT = Math.min(t1, t2);
+    const maxT = Math.max(t1, t2);
+
+    // Check if strictly contained (with some buffer to avoid splitting at exact endpoints if undesired, 
+    // but usually exact endpoints means connected, not split. 
+    // We want splitting only if it's strictly inside, i.e., not touching endpoints)
+    const epsilon = 0.01;
+    return minT > epsilon && maxT < (1 - epsilon);
 }
 
 function getThreeColor(type) {
