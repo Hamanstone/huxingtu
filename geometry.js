@@ -85,7 +85,112 @@ export function getMoveSnapCorrection(dx, dy, selection, objects, scale) {
         }
     }
 
+    const selectionBounds = getSelectionBounds(selection);
+    const alignment = getAlignmentCorrection(selectionBounds, dx, dy, unselected, scale);
+    if (alignment.x !== 0 && (correctionX === 0 || Math.abs(alignment.x) < Math.abs(correctionX))) {
+        correctionX = alignment.x;
+    }
+    if (alignment.y !== 0 && (correctionY === 0 || Math.abs(alignment.y) < Math.abs(correctionY))) {
+        correctionY = alignment.y;
+    }
+
     return { x: correctionX, y: correctionY };
+}
+
+export function getBounds(obj) {
+    if (!obj) return null;
+    const left = Math.min(obj.x1, obj.x2);
+    const right = Math.max(obj.x1, obj.x2);
+    const top = Math.min(obj.y1, obj.y2);
+    const bottom = Math.max(obj.y1, obj.y2);
+    return {
+        left,
+        right,
+        top,
+        bottom,
+        centerX: (left + right) / 2,
+        centerY: (top + bottom) / 2
+    };
+}
+
+export function getSelectionBounds(selection) {
+    if (!selection || selection.length === 0) return null;
+    let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+    selection.forEach(obj => {
+        left = Math.min(left, obj.x1, obj.x2);
+        right = Math.max(right, obj.x1, obj.x2);
+        top = Math.min(top, obj.y1, obj.y2);
+        bottom = Math.max(bottom, obj.y1, obj.y2);
+    });
+    return {
+        left,
+        right,
+        top,
+        bottom,
+        centerX: (left + right) / 2,
+        centerY: (top + bottom) / 2
+    };
+}
+
+function axisDistance(low1, high1, low2, high2) {
+    if (high1 < low2) return low2 - high1;
+    if (high2 < low1) return low1 - high2;
+    return 0;
+}
+
+export function getAlignmentCorrection(selectionBounds, dx, dy, targets, scale) {
+    if (!selectionBounds || !targets || targets.length === 0) return { x: 0, y: 0 };
+    const threshold = 40 / scale;
+    const moved = {
+        left: selectionBounds.left + dx,
+        right: selectionBounds.right + dx,
+        top: selectionBounds.top + dy,
+        bottom: selectionBounds.bottom + dy,
+        centerX: selectionBounds.centerX + dx,
+        centerY: selectionBounds.centerY + dy
+    };
+
+    const selectionX = [moved.left, moved.centerX, moved.right];
+    const selectionY = [moved.top, moved.centerY, moved.bottom];
+
+    let bestX = { dist: threshold, value: 0 };
+    let bestY = { dist: threshold, value: 0 };
+
+    targets.forEach(target => {
+        const targetBounds = getBounds(target);
+        if (!targetBounds) return;
+
+        const verticalDistance = axisDistance(moved.top, moved.bottom, targetBounds.top, targetBounds.bottom);
+        const horizontalDistance = axisDistance(moved.left, moved.right, targetBounds.left, targetBounds.right);
+
+        if (verticalDistance <= threshold) {
+            const targetX = [targetBounds.left, targetBounds.centerX, targetBounds.right];
+            selectionX.forEach(selX => {
+                targetX.forEach(tx => {
+                    const deltaX = tx - selX;
+                    const candidateDist = Math.hypot(deltaX, verticalDistance);
+                    if (candidateDist < bestX.dist) {
+                        bestX = { dist: candidateDist, value: deltaX };
+                    }
+                });
+            });
+        }
+
+        if (horizontalDistance <= threshold) {
+            const targetY = [targetBounds.top, targetBounds.centerY, targetBounds.bottom];
+            selectionY.forEach(selY => {
+                targetY.forEach(ty => {
+                    const deltaY = ty - selY;
+                    const candidateDist = Math.hypot(deltaY, horizontalDistance);
+                    if (candidateDist < bestY.dist) {
+                        bestY = { dist: candidateDist, value: deltaY };
+                    }
+                });
+            });
+        }
+    });
+
+    return { x: bestX.value, y: bestY.value };
 }
 
 export function areSegmentsCollinear(segA, segB, tolerance = 6) {

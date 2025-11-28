@@ -32,6 +32,18 @@ const state = {
     lastContextWorld: null,
 };
 
+const TYPE_DEFAULTS = {
+    wall: { width: 3, height: 80, color: '#00ffcc' },
+    door: { width: 2, height: 70, color: '#ffd700' },
+    window: { width: 2, height: 50, color: '#87cefa' },
+    furniture: { width: 3, height: 45, color: '#ff69b4' },
+};
+
+function getTypeDefaults(type) {
+    const base = TYPE_DEFAULTS[type] || TYPE_DEFAULTS.wall;
+    return { ...base };
+}
+
 // ==== Canvas Setup ====
 const canvas = document.getElementById('floorplan-canvas');
 const ctx = canvas.getContext('2d');
@@ -59,6 +71,9 @@ document.getElementById('prop-length').onchange = (e) => applyPropertyChange('le
 document.getElementById('prop-angle').onchange = (e) => applyPropertyChange('angle', parseFloat(e.target.value));
 document.getElementById('prop-door-type').onchange = (e) => applyPropertyChange('subtype', e.target.value);
 document.getElementById('prop-door-open').onchange = (e) => applyPropertyChange('isOpen', e.target.checked);
+document.getElementById('prop-width').onchange = (e) => applyPropertyChange('width', parseFloat(e.target.value));
+document.getElementById('prop-height').onchange = (e) => applyPropertyChange('height', parseFloat(e.target.value));
+document.getElementById('prop-color').onchange = (e) => applyPropertyChange('color', e.target.value);
 
 document.getElementById('preview-3d').onclick = open3DPreview;
 document.getElementById('export').onclick = exportFloorplan;
@@ -618,6 +633,7 @@ window.addEventListener('mouseup', (e) => {
         }
     }
 
+    const typeDefaults = getTypeDefaults(state.mode);
     const newObj = {
         type: state.mode,
         subtype: state.mode === 'door' ? 'single' : null, // Default to single
@@ -626,6 +642,9 @@ window.addEventListener('mouseup', (e) => {
         y1: state.dragStart.y,
         x2: endX,
         y2: endY,
+        width: typeDefaults.width,
+        height: typeDefaults.height,
+        color: typeDefaults.color,
     };
     state.objects.push(newObj);
 
@@ -697,8 +716,12 @@ function draw() {
     // draw objects
     // draw objects
     state.objects.forEach(obj => {
-        ctx.strokeStyle = getColorForType(obj.type);
-        ctx.lineWidth = 3 / state.scale; // Keep outline width constant visually
+        const typeDefaults = getTypeDefaults(obj.type);
+        const strokeColor = obj.color || typeDefaults.color;
+        const lineWidth = Math.max(obj.width ?? typeDefaults.width, 0.5);
+
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = lineWidth / state.scale; // Keep outline width constant visually
 
         if (obj.type === 'door') {
             drawDoor(obj);
@@ -967,13 +990,7 @@ function drawDoor(obj) {
 }
 
 function getColorForType(type) {
-    switch (type) {
-        case 'wall': return 'hsl(170, 60%, 45%)';
-        case 'door': return 'hsl(45, 80%, 55%)';
-        case 'window': return 'hsl(200, 80%, 55%)';
-        case 'furniture': return 'hsl(300, 60%, 55%)';
-        default: return '#fff';
-    }
+    return TYPE_DEFAULTS[type]?.color || '#ffffff';
 }
 
 // ==== Export / Import ====
@@ -1066,8 +1083,10 @@ function initThree() {
     // Convert 2D objects to 3D
     state.objects.forEach(obj => {
         const length = Math.hypot(obj.x2 - obj.x1, obj.y2 - obj.y1);
-        const height = obj.type === 'wall' ? 80 : (obj.type === 'door' ? 60 : 40);
-        const thickness = obj.type === 'wall' ? 8 : 5;
+        const defaults = getTypeDefaults(obj.type);
+        const height = obj.height ?? defaults.height;
+        const thickness = obj.width ?? defaults.width;
+        const color = obj.color || defaults.color;
 
         // position at midpoint
         const midX = (obj.x1 + obj.x2) / 2 - canvas.width / 2;
@@ -1076,7 +1095,7 @@ function initThree() {
 
         if (obj.type === 'door') {
             const mat = new THREE.MeshStandardMaterial({
-                color: getThreeColor(obj.type),
+                color: getThreeColor(obj),
                 roughness: 0.7,
                 metalness: 0.3
             });
@@ -1152,7 +1171,7 @@ function initThree() {
             // Wall, Window, Furniture
             const geometry = new THREE.BoxGeometry(length, height, thickness);
             const material = new THREE.MeshStandardMaterial({
-                color: getThreeColor(obj.type),
+                color: getThreeColor(obj),
                 roughness: 0.7,
                 metalness: 0.3
             });
@@ -1186,6 +1205,9 @@ function updatePropertyPanel() {
 
     const panel = document.getElementById('property-panel');
     const doorSection = document.getElementById('prop-door-section');
+    const widthInput = document.getElementById('prop-width');
+    const heightInput = document.getElementById('prop-height');
+    const colorInput = document.getElementById('prop-color');
 
     if (state.selection.length !== 1) {
         // Clear inputs or show "No selection" / "Multiple selection"
@@ -1199,6 +1221,9 @@ function updatePropertyPanel() {
         document.getElementById('prop-length').value = '';
         document.getElementById('prop-angle').value = '';
         doorSection.classList.add('hidden');
+        widthInput.value = '';
+        heightInput.value = '';
+        colorInput.value = '#ffffff';
         return;
     }
 
@@ -1218,6 +1243,14 @@ function updatePropertyPanel() {
     if (document.activeElement.id !== 'prop-y') document.getElementById('prop-y').value = Math.round(midY);
     if (document.activeElement.id !== 'prop-length') document.getElementById('prop-length').value = Math.round(length);
     if (document.activeElement.id !== 'prop-angle') document.getElementById('prop-angle').value = Math.round(angle);
+    const typeDefaults = getTypeDefaults(obj.type);
+    const widthValue = obj.width ?? typeDefaults.width;
+    const heightValue = obj.height ?? typeDefaults.height;
+    const colorValue = normalizeColor(obj.color || typeDefaults.color);
+
+    if (document.activeElement.id !== 'prop-width') widthInput.value = Math.round(widthValue);
+    if (document.activeElement.id !== 'prop-height') heightInput.value = Math.round(heightValue);
+    colorInput.value = colorValue;
 
     // Door specific
     if (obj.type === 'door') {
@@ -1269,11 +1302,31 @@ function applyPropertyChange(prop, value) {
         obj.subtype = value;
     } else if (prop === 'isOpen') {
         obj.isOpen = value;
+    } else if (prop === 'width') {
+        if (!Number.isNaN(value) && value > 0) obj.width = value;
+    } else if (prop === 'height') {
+        if (!Number.isNaN(value) && value > 0) obj.height = value;
+    } else if (prop === 'color') {
+        obj.color = normalizeColor(value);
     }
 
     saveToHistory();
     draw();
     updatePropertyPanel();
+}
+
+function normalizeColor(value) {
+    if (typeof value !== 'string') return '#ffffff';
+    if (!value.startsWith('#')) return '#ffffff';
+    if (value.length === 7) return value.toLowerCase();
+    if (value.length === 4) {
+        const expand = (char) => `${char}${char}`;
+        const r = expand(value[1]);
+        const g = expand(value[2]);
+        const b = expand(value[3]);
+        return `#${r}${g}${b}`.toLowerCase();
+    }
+    return '#ffffff';
 }
 
 // ==== Object Splitting Logic ====
@@ -1310,12 +1363,14 @@ function checkAndSplitObjects(activeObj) {
             y: otherObj.y1 + tEnd * dY
         };
 
+        const originalEnd = { x: otherObj.x2, y: otherObj.y2 };
+
         const segment2 = {
-            type: 'wall',
+            ...otherObj,
             x1: splitEnd.x,
             y1: splitEnd.y,
-            x2: otherObj.x2,
-            y2: otherObj.y2
+            x2: originalEnd.x,
+            y2: originalEnd.y
         };
 
         otherObj.x2 = splitStart.x;
@@ -1358,13 +1413,17 @@ function checkAndMergeWalls() {
                 if (!mergedSegment) continue;
 
                 state.objects = state.objects.filter(o => o !== w1 && o !== w2);
-                state.objects.push({
-                    type: 'wall',
+                const mergedObj = {
+                    ...w1,
                     x1: mergedSegment.start.x,
                     y1: mergedSegment.start.y,
                     x2: mergedSegment.end.x,
                     y2: mergedSegment.end.y
-                });
+                };
+                state.objects.push(mergedObj);
+                if (state.selection.includes(w1) || state.selection.includes(w2)) {
+                    state.selection = [mergedObj];
+                }
 
                 merged = true;
                 break;
@@ -1374,14 +1433,9 @@ function checkAndMergeWalls() {
     } while (merged);
 }
 
-function getThreeColor(type) {
-    switch (type) {
-        case 'wall': return 0x00ffcc;
-        case 'door': return 0xffd700;
-        case 'window': return 0x87cefa;
-        case 'furniture': return 0xff69b4;
-        default: return 0xffffff;
-    }
+function getThreeColor(obj) {
+    const color = obj?.color || getColorForType(obj?.type);
+    return new THREE.Color(color);
 }
 
 function renderThree() {
