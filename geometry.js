@@ -140,6 +140,7 @@ function axisDistance(low1, high1, low2, high2) {
 
 export function getAlignmentCorrection(selectionBounds, dx, dy, targets, scale) {
     if (!selectionBounds || !targets || targets.length === 0) return { x: 0, y: 0 };
+
     const threshold = 40 / scale;
     const moved = {
         left: selectionBounds.left + dx,
@@ -160,37 +161,49 @@ export function getAlignmentCorrection(selectionBounds, dx, dy, targets, scale) 
         const targetBounds = getBounds(target);
         if (!targetBounds) return;
 
-        const verticalDistance = axisDistance(moved.top, moved.bottom, targetBounds.top, targetBounds.bottom);
-        const horizontalDistance = axisDistance(moved.left, moved.right, targetBounds.left, targetBounds.right);
+        const targetXs = [targetBounds.left, targetBounds.centerX, targetBounds.right];
+        const targetYs = [targetBounds.top, targetBounds.centerY, targetBounds.bottom];
 
-        if (verticalDistance <= threshold) {
-            const targetX = [targetBounds.left, targetBounds.centerX, targetBounds.right];
-            selectionX.forEach(selX => {
-                targetX.forEach(tx => {
-                    const deltaX = tx - selX;
-                    const candidateDist = Math.hypot(deltaX, verticalDistance);
-                    if (candidateDist < bestX.dist) {
-                        bestX = { dist: candidateDist, value: deltaX };
-                    }
-                });
+        selectionX.forEach(selX => {
+            targetXs.forEach(tx => {
+                const deltaX = tx - selX;
+                if (Math.abs(deltaX) < bestX.dist) {
+                    bestX = { dist: Math.abs(deltaX), value: deltaX };
+                }
             });
-        }
+        });
 
-        if (horizontalDistance <= threshold) {
-            const targetY = [targetBounds.top, targetBounds.centerY, targetBounds.bottom];
-            selectionY.forEach(selY => {
-                targetY.forEach(ty => {
-                    const deltaY = ty - selY;
-                    const candidateDist = Math.hypot(deltaY, horizontalDistance);
-                    if (candidateDist < bestY.dist) {
-                        bestY = { dist: candidateDist, value: deltaY };
-                    }
-                });
+        selectionY.forEach(selY => {
+            targetYs.forEach(ty => {
+                const deltaY = ty - selY;
+                if (Math.abs(deltaY) < bestY.dist) {
+                    bestY = { dist: Math.abs(deltaY), value: deltaY };
+                }
             });
-        }
+        });
     });
 
     return { x: bestX.value, y: bestY.value };
+}
+
+export function getAxisSnap(value, axis, objects, exclude = [], scale = 1) {
+    const threshold = 12 / scale;
+    let best = { dist: threshold, value: null };
+    objects.forEach(obj => {
+        if (exclude.includes(obj)) return;
+        const bounds = getBounds(obj);
+        if (!bounds) return;
+        const candidates = axis === 'x'
+            ? [bounds.left, bounds.centerX, bounds.right]
+            : [bounds.top, bounds.centerY, bounds.bottom];
+        candidates.forEach(candidate => {
+            const dist = Math.abs(candidate - value);
+            if (dist < best.dist) {
+                best = { dist, value: candidate };
+            }
+        });
+    });
+    return best.value !== null ? best.value : null;
 }
 
 export function areSegmentsCollinear(segA, segB, tolerance = 6) {

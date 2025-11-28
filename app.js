@@ -488,6 +488,11 @@ window.addEventListener('mousemove', (e) => {
             }
         }
 
+        const snapX = Geometry.getAxisSnap(x, 'x', state.objects, [obj], state.scale);
+        const snapY = Geometry.getAxisSnap(y, 'y', state.objects, [obj], state.scale);
+        if (snapX !== null) x = snapX;
+        if (snapY !== null) y = snapY;
+
         if (state.resizeHandle === 'start') {
             obj.x1 = x;
             obj.y1 = y;
