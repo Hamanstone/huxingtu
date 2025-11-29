@@ -33,9 +33,9 @@ const state = {
 };
 
 const TYPE_DEFAULTS = {
-    wall: { width: 3, height: 80, color: '#00ffcc' },
+    wall: { width: 3, height: 80, color: '#ffffff' },       // default white wall
     door: { width: 2, height: 70, color: '#ffd700' },
-    window: { width: 2, height: 50, color: '#87cefa' },
+    window: { width: 2, height: 50, color: '#444444', frameColor: '#444444', bottomOffset: 10, topOffset: 10 },     // dark gray window
     furniture: { width: 3, height: 45, color: '#ff69b4' },
 };
 
@@ -74,6 +74,9 @@ document.getElementById('prop-door-open').onchange = (e) => applyPropertyChange(
 document.getElementById('prop-width').onchange = (e) => applyPropertyChange('width', parseFloat(e.target.value));
 document.getElementById('prop-height').onchange = (e) => applyPropertyChange('height', parseFloat(e.target.value));
 document.getElementById('prop-color').onchange = (e) => applyPropertyChange('color', e.target.value);
+document.getElementById('prop-frame-color').onchange = (e) => applyPropertyChange('frameColor', e.target.value);
+document.getElementById('prop-window-bottom').onchange = (e) => applyPropertyChange('bottomOffset', parseFloat(e.target.value));
+document.getElementById('prop-window-top').onchange = (e) => applyPropertyChange('topOffset', parseFloat(e.target.value));
 
 document.getElementById('preview-3d').onclick = open3DPreview;
 document.getElementById('export').onclick = exportFloorplan;
@@ -650,6 +653,9 @@ window.addEventListener('mouseup', (e) => {
         width: typeDefaults.width,
         height: typeDefaults.height,
         color: typeDefaults.color,
+        frameColor: typeDefaults.frameColor || typeDefaults.color,
+        bottomOffset: typeDefaults.bottomOffset,
+        topOffset: typeDefaults.topOffset,
     };
     state.objects.push(newObj);
 
@@ -1089,6 +1095,7 @@ function initThree() {
     state.objects.forEach(obj => {
         const length = Math.hypot(obj.x2 - obj.x1, obj.y2 - obj.y1);
         const defaults = getTypeDefaults(obj.type);
+        const wallDefaults = getTypeDefaults('wall');
         const height = obj.height ?? defaults.height;
         const thickness = obj.width ?? defaults.width;
         const color = obj.color || defaults.color;
@@ -1172,8 +1179,121 @@ function initThree() {
                 pivotGroup.add(mesh);
                 doorGroup.add(pivotGroup);
             }
+        } else if (obj.type === 'window') {
+            const wallHeight = wallDefaults.height ?? height;
+            let bottomOffset = Math.max(0, obj.bottomOffset ?? defaults.bottomOffset ?? 0);
+            let windowHeight = Math.max(0.1, obj.height ?? defaults.height);
+            let topOffset = Math.max(0, obj.topOffset ?? defaults.topOffset ?? 0);
+
+            // Keep total within wall height, prefer reducing top, then bottom.
+            const total = bottomOffset + windowHeight + topOffset;
+            if (total > wallHeight) {
+                let overflow = total - wallHeight;
+                const newTop = Math.max(0, topOffset - overflow);
+                overflow -= (topOffset - newTop);
+                topOffset = newTop;
+                if (overflow > 0) {
+                    bottomOffset = Math.max(0, bottomOffset - overflow);
+                }
+            }
+
+            const wallThickness = Math.max(thickness, wallDefaults.width);
+            const wallMat = new THREE.MeshStandardMaterial({
+                color: getThreeColor({ type: 'wall', color: wallDefaults.color }),
+                roughness: 0.7,
+                metalness: 0.2
+            });
+
+            if (bottomOffset > 0.01) {
+                const bottomGeom = new THREE.BoxGeometry(length, bottomOffset, wallThickness);
+                const bottomMesh = new THREE.Mesh(bottomGeom, wallMat);
+                bottomMesh.castShadow = true;
+                bottomMesh.receiveShadow = true;
+                bottomMesh.position.set(midX, bottomOffset / 2, midY);
+                bottomMesh.rotation.y = -angle;
+                previewScene.add(bottomMesh);
+            }
+
+            // Window
+            const winGeom = new THREE.BoxGeometry(length, windowHeight, thickness);
+            const winMat = new THREE.MeshStandardMaterial({
+                color: getThreeColor(obj),
+                roughness: 0.3,
+                metalness: 0.1,
+                opacity: 0.7,
+                transparent: true
+            });
+            const winMesh = new THREE.Mesh(winGeom, winMat);
+            winMesh.position.set(midX, bottomOffset + windowHeight / 2, midY);
+            winMesh.rotation.y = -angle;
+            previewScene.add(winMesh);
+
+            // Frame + mullions (simple cross frame)
+            const windowGroup = new THREE.Group();
+            windowGroup.position.set(midX, 0, midY);
+            windowGroup.rotation.y = -angle;
+            previewScene.add(windowGroup);
+
+            const frameColor = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(obj.frameColor || obj.color || defaults.frameColor || defaults.color),
+                roughness: 0.6,
+                metalness: 0.2
+            });
+
+            const frameDepth = Math.max(thickness * 0.8, 1);
+            const frameWidth = Math.max(thickness * 0.6, 1);
+            const innerHeight = Math.max(0.1, windowHeight - frameWidth * 2);
+            const innerWidth = Math.max(0.1, length - frameWidth * 2);
+            const baseY = bottomOffset;
+
+            // Borders
+            const verticalGeom = new THREE.BoxGeometry(frameWidth, windowHeight, frameDepth);
+            const horizGeom = new THREE.BoxGeometry(length, frameWidth, frameDepth);
+
+            const leftFrame = new THREE.Mesh(verticalGeom, frameColor);
+            leftFrame.position.set(-length / 2 + frameWidth / 2, baseY + windowHeight / 2, 0);
+            const rightFrame = leftFrame.clone();
+            rightFrame.position.x = length / 2 - frameWidth / 2;
+
+            const topFrame = new THREE.Mesh(horizGeom, frameColor);
+            topFrame.position.set(0, baseY + windowHeight - frameWidth / 2, 0);
+            const bottomFrame = topFrame.clone();
+            bottomFrame.position.y = baseY + frameWidth / 2;
+
+            // Mullions with 2:1 vertical split (bottom larger); only bottom half split left/right
+            const hBar = frameWidth * 3; // horizontal bar thicker
+            const usable = Math.max(0.1, innerHeight - hBar);
+            const topSectionH = usable / 3; // 1/3
+            const bottomSectionH = usable - topSectionH; // 2/3
+
+            // Horizontal mullion separating top/bottom
+            const mullionH = new THREE.Mesh(new THREE.BoxGeometry(innerWidth, hBar, frameDepth), frameColor);
+            const barCenterY = baseY + frameWidth + topSectionH + hBar / 2;
+            mullionH.position.set(0, barCenterY, 0);
+
+            // Vertical mullion for bottom section (connects to horizontal bar)
+            const bottomMullionHeight = Math.max(0.1, bottomSectionH);
+            const bottomStartY = baseY + frameWidth + topSectionH + hBar;
+            const mullionVBottom = new THREE.Mesh(new THREE.BoxGeometry(frameWidth, bottomMullionHeight, frameDepth), frameColor);
+            mullionVBottom.position.set(0, bottomStartY + bottomMullionHeight / 2, 0);
+
+            [leftFrame, rightFrame, topFrame, bottomFrame, mullionH, mullionVBottom].forEach(mesh => {
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                windowGroup.add(mesh);
+            });
+
+            if (topOffset > 0.01) {
+                const topGeom = new THREE.BoxGeometry(length, topOffset, wallThickness);
+                const topMesh = new THREE.Mesh(topGeom, wallMat);
+                topMesh.castShadow = true;
+                topMesh.receiveShadow = true;
+                topMesh.position.set(midX, bottomOffset + windowHeight + topOffset / 2, midY);
+                topMesh.rotation.y = -angle;
+                previewScene.add(topMesh);
+            }
         } else {
-            // Wall, Window, Furniture
+            // Wall, Furniture (and other line-based items)
             const geometry = new THREE.BoxGeometry(length, height, thickness);
             const material = new THREE.MeshStandardMaterial({
                 color: getThreeColor(obj),
@@ -1210,9 +1330,13 @@ function updatePropertyPanel() {
 
     const panel = document.getElementById('property-panel');
     const doorSection = document.getElementById('prop-door-section');
+    const windowSection = document.getElementById('prop-window-section');
     const widthInput = document.getElementById('prop-width');
     const heightInput = document.getElementById('prop-height');
     const colorInput = document.getElementById('prop-color');
+    const frameColorInput = document.getElementById('prop-frame-color');
+    const winBottomInput = document.getElementById('prop-window-bottom');
+    const winTopInput = document.getElementById('prop-window-top');
 
     if (state.selection.length !== 1) {
         // Clear inputs or show "No selection" / "Multiple selection"
@@ -1226,9 +1350,13 @@ function updatePropertyPanel() {
         document.getElementById('prop-length').value = '';
         document.getElementById('prop-angle').value = '';
         doorSection.classList.add('hidden');
+        windowSection.classList.add('hidden');
         widthInput.value = '';
         heightInput.value = '';
         colorInput.value = '#ffffff';
+        frameColorInput.value = '#444444';
+        winBottomInput.value = '';
+        winTopInput.value = '';
         return;
     }
 
@@ -1252,10 +1380,14 @@ function updatePropertyPanel() {
     const widthValue = obj.width ?? typeDefaults.width;
     const heightValue = obj.height ?? typeDefaults.height;
     const colorValue = normalizeColor(obj.color || typeDefaults.color);
+    const frameColorValue = normalizeColor(obj.frameColor || colorValue);
+    const winBottom = obj.bottomOffset ?? typeDefaults.bottomOffset ?? 0;
+    const winTop = obj.topOffset ?? typeDefaults.topOffset ?? 0;
 
     if (document.activeElement.id !== 'prop-width') widthInput.value = Math.round(widthValue);
     if (document.activeElement.id !== 'prop-height') heightInput.value = Math.round(heightValue);
     colorInput.value = colorValue;
+    frameColorInput.value = frameColorValue;
 
     // Door specific
     if (obj.type === 'door') {
@@ -1264,6 +1396,14 @@ function updatePropertyPanel() {
         document.getElementById('prop-door-open').checked = !!obj.isOpen;
     } else {
         doorSection.classList.add('hidden');
+    }
+
+    if (obj.type === 'window') {
+        windowSection.classList.remove('hidden');
+        if (document.activeElement.id !== 'prop-window-bottom') winBottomInput.value = Math.round(winBottom);
+        if (document.activeElement.id !== 'prop-window-top') winTopInput.value = Math.round(winTop);
+    } else {
+        windowSection.classList.add('hidden');
     }
 }
 
@@ -1313,7 +1453,15 @@ function applyPropertyChange(prop, value) {
         if (!Number.isNaN(value) && value > 0) obj.height = value;
     } else if (prop === 'color') {
         obj.color = normalizeColor(value);
+    } else if (prop === 'frameColor') {
+        obj.frameColor = normalizeColor(value);
+    } else if (prop === 'bottomOffset') {
+        if (!Number.isNaN(value) && value >= 0) obj.bottomOffset = value;
+    } else if (prop === 'topOffset') {
+        if (!Number.isNaN(value) && value >= 0) obj.topOffset = value;
     }
+
+    if (obj.type === 'window') clampWindowOffsets(obj);
 
     saveToHistory();
     draw();
@@ -1332,6 +1480,28 @@ function normalizeColor(value) {
         return `#${r}${g}${b}`.toLowerCase();
     }
     return '#ffffff';
+}
+
+function clampWindowOffsets(obj) {
+    const wallHeight = getTypeDefaults('wall').height;
+    const winDefaults = getTypeDefaults('window');
+    obj.height = obj.height ?? winDefaults.height;
+    obj.bottomOffset = Math.max(0, obj.bottomOffset ?? winDefaults.bottomOffset ?? 0);
+    obj.topOffset = Math.max(0, obj.topOffset ?? winDefaults.topOffset ?? 0);
+
+    // Ensure total does not exceed wall height
+    let total = obj.bottomOffset + obj.height + obj.topOffset;
+    if (total > wallHeight) {
+        // Reduce top first, then bottom if needed
+        const overflow = total - wallHeight;
+        const topAfter = Math.max(0, obj.topOffset - overflow);
+        const reduced = obj.topOffset - topAfter;
+        obj.topOffset = topAfter;
+        const remainingOverflow = overflow - reduced;
+        if (remainingOverflow > 0) {
+            obj.bottomOffset = Math.max(0, obj.bottomOffset - remainingOverflow);
+        }
+    }
 }
 
 // ==== Object Splitting Logic ====
